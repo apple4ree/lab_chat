@@ -105,3 +105,9 @@ GPU 이력·OS 계정별 집계·예약 신청/수정/검토/승인/배정/취�
 기본 다운로드를 Windows x64 NSIS EXE와 macOS Apple Silicon·Intel DMG로 교체했습니다. [GitHub Actions 실행 39375371365](https://github.com/apple4ree/lab_chat/actions/runs/39375371365)의 소스 커밋 `9db04b1e0804e5c2c8d55a9079f112a9c3b4d64f`에서 세 플랫폼 모두 빌드와 네이티브 검증을 통과했습니다. Windows에서는 설치·시작 메뉴·실제 패키지 실행·제거를, Mac에서는 DMG 검증·마운트·Applications 링크·앱 복사·아키텍처·프레임워크 링크·ad-hoc 서명 검증·실제 패키지 실행을 확인했습니다. 모두 운영 로그인 화면과 렌더러 격리를 확인했으며 계정 로그인 없이 실행했습니다. Windows 체크아웃의 CRLF 변환은 `.gitattributes`에서 LF로 통일했습니다. 최종 게시 시 세 파일의 전체 SHA-256과 포함된 런타임 소스를 고정된 Git 커밋과 대조했습니다. 개발자 인증서 서명·Apple 공증·일반 사용자 환경의 SmartScreen/Gatekeeper 승인·자동 업데이트는 검증 또는 제공 범위에 포함되지 않습니다.
 
 기존 화면과 목록 백업은 `.data/installer-backup/2026-10-20T05-28-35.696Z/`에 있습니다. 모든 파일 검증 후 manifest를 원자적으로 교체하고 새 웹 자산과 index를 배포했습니다. 서버 재시작 없이 이전 자산과 0.1.0 ZIP 파일을 보존했습니다. 운영·데모의 실제 Chrome에서 로그인 후 EXE 한 개와 DMG 두 개의 표시, 각 파일의 Range 206·로컬 바이트 일치·다운로드 헤더·DMG 푸터, 로그아웃 후 목록과 파일의 401, 브라우저 예외 0건을 확인했습니다. 공개 HTML은 배포 index와 일치하며 두 DB의 users/messages 해시 유지 및 `integrity_check=ok`를 확인했습니다. 전체 파일 검증은 로컬에서, 공개 전송 검증은 바이트 범위 요청으로 수행했습니다. 증거는 `.data/deploy/evidence/installers-{native-ci,packages,public,final}.json`과 `installers-public-{local,demo}.png`입니다. 로컬 검증은 데스크톱 정책 3개, 게시·다운로드 API 5개, 다운로드 브라우저 시나리오 2개, TypeScript 검사와 Vite 빌드가 통과했습니다.
+
+## 2026-10-20 06:45 UTC — 화면 애니메이션과 전송 피드백
+
+소스 커밋 `dd5ae2b5a65b80b787d1b75f6cecb323f26f0c5a`의 웹 빌드를 운영·데모에 배포했습니다. 버튼·메뉴·스레드·새 메시지 효과, 전송 성공 표시, GPU 막대 전환과 동작 줄이기를 추가했습니다. 구현과 로컬 검증 범위는 [MOTION.md](MOTION.md)에 있습니다. 새 자산을 추가하고 index를 원자적으로 교체했으며 서버 재시작과 설치 파일 변경은 하지 않았습니다. 이전 index 백업은 `.data/motion-backup/2026-10-20T06-43-03.393Z/`입니다.
+
+두 공개 도메인에서 Chrome으로 대화상자 효과, 실행 중 동작 줄이기 설정 변경, 모바일 메뉴 열기·바깥 영역으로 닫기, 가로 넘침 없음, 배포 HTML 일치, JavaScript 예외 0건을 확인했습니다. 운영 메시지는 작성하지 않았습니다. 두 DB의 계정·메시지 해시 보존 및 무결성 `ok`를 확인했습니다. 증거는 `.data/deploy/evidence/motion-{before,public,data}.json`과 `motion-public-{local,demo}.png`입니다. 네이티브 앱 재실행 검증은 이번 배포 범위에 포함하지 않았습니다.
