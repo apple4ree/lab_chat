@@ -81,6 +81,8 @@ npm run build
 npm run test:browser
 ```
 
+`npm run build`는 현재 화면에서 참조하는 JS·CSS의 gzip 용량도 검사합니다. `npm run audit:storage`는 설치 파일·빌드·의존성의 논리 크기를 함께 보고하며 파일을 삭제하지 않습니다. 통신 재측정과 안전한 보관 파일 중복 제거는 [NETWORK.md](docs/NETWORK.md)를 참고하세요.
+
 브라우저 검증에는 `/usr/bin/google-chrome`을 사용합니다. 다른 위치는 `CHROME_PATH`로 지정합니다. Playwright가 브라우저를 추가 설치하지 않습니다. 테스트 서버는 4311·4312 포트와 별도 임시 디렉터리를 사용하고 종료 시 정리합니다. 검증 대상과 결과는 [VALIDATION.md](docs/VALIDATION.md)에 기록합니다.
 
 화면 개발은 두 터미널에서 아래 명령을 각각 실행합니다. Vite 출처를 쓰기 요청 허용 출처로 지정해야 합니다.

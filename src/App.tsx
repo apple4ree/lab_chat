@@ -7,6 +7,7 @@ import {Avatar,Dialog,Composer,MessageRow,Body} from './components';
 import {canMarkRead,clearDesktopSession,useDesktop} from './desktop';
 import {DesktopDownloads} from './DesktopDownloads';
 import {useMessageArrival} from './motion';
+import {useSync,mergeMessages,type SyncBatch} from './sync';
 
 const channelName=(channel:Channel,me:User)=>channel.kind==='dm'?channel.members.filter(u=>u.id!==me.id).map(u=>u.name).join(', '):channel.name;
 const channelIcon=(c:Channel,size=18)=>c.kind==='private'?<Lock size={size}/>:c.kind==='dm'?<MessageSquare size={size}/>:<Hash size={size}/>;
@@ -25,29 +26,53 @@ export default function App(){
 function Workspace({me,config,onLogout}:{me:User;config:AuthConfig;onLogout:()=>void}){
   const [channels,setChannels]=useState<Channel[]>([]),[users,setUsers]=useState<User[]>([]),[selected,setSelected]=useState(''),[messages,setMessages]=useState<Message[]>([]),[hasMore,setHasMore]=useState(false),[loading,setLoading]=useState(true),[loadingOlder,setLoadingOlder]=useState(false);
   const [gpuOpen,setGpuOpen]=useState(false);
-  const [tick,setTick]=useState(0),[error,setError]=useState(''),[dialog,setDialog]=useState<string|null>(null),[thread,setThread]=useState<Message|null>(null),[mobileNav,setMobileNav]=useState(false),[connected,setConnected]=useState(false);
-  const list=useRef<HTMLDivElement>(null),selectedRef=useRef(selected),scrollToEnd=useRef(true),historyPages=useRef(1),refreshTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
-  selectedRef.current=selected;
+  const [tick,setTick]=useState(0),[error,setError]=useState(''),[dialog,setDialog]=useState<string|null>(null),[thread,setThread]=useState<Message|null>(null),[mobileNav,setMobileNav]=useState(false);
+  const list=useRef<HTMLDivElement>(null),selectedRef=useRef(selected),scrollToEnd=useRef(true),historyPages=useRef(1),readAck=useRef(new Map<string,number>()),channelsRef=useRef(channels);
+  selectedRef.current=selected;channelsRef.current=channels;
   useMessageArrival(list,messages,selected,!loading&&!gpuOpen);
-  const channel=channels.find(c=>c.id===selected),refresh=useCallback(()=>setTick(t=>t+1),[]);
+  const channel=channels.find(c=>c.id===selected);
+  const [threadDelta,setThreadDelta]=useState<Message[]>([]),[snapshotFailed,setSnapshotFailed]=useState(false);
+  useFailedSnapshotRecovery(snapshotFailed,()=>setTick(t=>t+1));
   useDesktop(me.id,channels,gpuOpen?null:selected||null,choose);
   useEffect(()=>{if(location.hash==='#desktop-downloads')setDialog('desktop');},[]);
   const handleError=useCallback((e:unknown)=>{if(e instanceof ApiError&&e.status===401){onLogout();return;}setError(e instanceof Error?e.message:'요청을 처리하지 못했습니다.');},[onLogout]);
-  useEffect(()=>{let live=true;Promise.all([api<Channel[]>('/channels'),api<User[]>('/users')]).then(([cs,us])=>{if(!live)return;setChannels(cs);setUsers(us);setSelected(current=>cs.some(c=>c.id===current)?current:cs[0]?.id||'');}).catch(handleError);return()=>{live=false;};},[tick,handleError]);
+  const markRead=useCallback(async(id:string,until:number)=>{
+    if(!until||!await canMarkRead())return;
+    const known=Math.max(readAck.current.get(id)??0,channelsRef.current.find(c=>c.id===id)?.last_read_id??0);
+    if(until<=known)return;
+    readAck.current.set(id,until);
+    try{await post(`/channels/${id}/read`,{until});setChannels(cs=>cs.map(c=>c.id===id?{...c,last_read_id:Math.max(c.last_read_id,until),...((c.latest_message_id??0)<=until?{unread:0,mentions:0}:{})}:c));}
+    catch(error){if(readAck.current.get(id)===until)readAck.current.delete(id);handleError(error);}
+  },[handleError]);
+  function applyBatch(batch:SyncBatch,requested:string|null){
+    if(batch.removedChannelIds.includes(selected)){setSelected('');setMessages([]);setThread(null);}
+    setChannels(existing=>{
+      const values=new Map((batch.reset||batch.users?[]:existing).map(c=>[c.id,c]));
+      for(const c of batch.channels){const read=readAck.current.get(c.id)??0;values.set(c.id,{...c,last_read_id:Math.max(c.last_read_id,read),...((c.latest_message_id??0)<=read?{unread:0,mentions:0}:{})});}
+      for(const id of batch.removedChannelIds)values.delete(id);
+      return [...values.values()];
+    });
+    if(batch.users)setUsers(batch.users);
+    if(batch.reset){readAck.current.clear();setMessages([]);setThreadDelta([]);setTick(t=>t+1);}
+    else if(requested===selected){
+      const nearBottom=!list.current||list.current.scrollHeight-list.current.scrollTop-list.current.clientHeight<160;
+      if(batch.messages.length){setMessages(ms=>mergeMessages(ms,batch.messages));if(nearBottom||scrollToEnd.current)requestAnimationFrame(()=>{if(list.current)list.current.scrollTop=list.current.scrollHeight;});scrollToEnd.current=false;}
+      if(batch.threadMessages.length)setThreadDelta(previous=>mergeMessages(previous.filter(m=>m.id===thread?.id||m.parent_id===thread?.id),batch.threadMessages));
+    }
+  }
+  const {connected,refresh}=useSync({channelId:gpuOpen?null:selected||null,threadId:thread?.id??null,onBatch:applyBatch,onError:handleError});
+  useEffect(()=>{if(channels.length)setSelected(id=>channels.some(c=>c.id===id)?id:channels[0].id);},[channels]);
   useEffect(()=>{
-    const events=new EventSource('/api/events');
-    const schedule=()=>{if(refreshTimer.current)clearTimeout(refreshTimer.current);refreshTimer.current=setTimeout(refresh,100);};
-    events.addEventListener('ready',()=>{setConnected(true);schedule();});events.addEventListener('refresh',schedule);events.onerror=()=>setConnected(false);
-    const focus=()=>{if(document.visibilityState==='visible')schedule();};document.addEventListener('visibilitychange',focus);window.addEventListener('focus',focus);
-    const recovery=setInterval(()=>{if(document.visibilityState==='visible')schedule();},30000);
-    return()=>{events.close();clearInterval(recovery);if(refreshTimer.current)clearTimeout(refreshTimer.current);document.removeEventListener('visibilitychange',focus);window.removeEventListener('focus',focus);};
-  },[refresh]);
+    const read=()=>{if(!gpuOpen&&selected)void markRead(selected,messages.at(-1)?.id??0);};
+    read();window.addEventListener('focus',read);document.addEventListener('visibilitychange',read);
+    return()=>{window.removeEventListener('focus',read);document.removeEventListener('visibilitychange',read);};
+  },[selected,messages,gpuOpen,markRead]);
   useEffect(()=>{const handler=(e:KeyboardEvent)=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();setDialog('search');}};window.addEventListener('keydown',handler);return()=>window.removeEventListener('keydown',handler);},[]);
   useEffect(()=>{if(!error)return;const timer=setTimeout(()=>setError(''),9000);return()=>clearTimeout(timer);},[error]);
   useEffect(()=>{setMessages([]);setLoading(true);scrollToEnd.current=true;historyPages.current=1;},[selected]);
   useEffect(()=>{
     if(!selected||gpuOpen)return;
-    let live=true;
+    let live=true;setSnapshotFailed(false);
     const controller=new AbortController();
     const loadWindow=async()=>{
       const data=await api<Page>(`/channels/${selected}/messages`,{signal:controller.signal});
@@ -60,18 +85,17 @@ function Workspace({me,config,onLogout}:{me:User;config:AuthConfig;onLogout:()=>
     loadWindow().then(async data=>{
       if(!live)return;
       const nearBottom=!list.current||list.current.scrollHeight-list.current.scrollTop-list.current.clientHeight<160;
-      setMessages(data.messages);setHasMore(data.hasMore);setLoading(false);
+      setMessages(ms=>mergeMessages(ms,data.messages));setHasMore(data.hasMore);setLoading(false);
       if(scrollToEnd.current||nearBottom){requestAnimationFrame(()=>{if(list.current)list.current.scrollTop=list.current.scrollHeight;});scrollToEnd.current=false;}
-      const until=data.messages.at(-1)?.id;
-      if(until&&await canMarkRead()&&live)void post(`/channels/${selected}/read`,{until}).then(()=>setChannels(cs=>cs.map(c=>c.id===selected?{...c,unread:0,mentions:0}:c))).catch(handleError);
-    }).catch(e=>{if(live&&e.name!=='AbortError'){setLoading(false);handleError(e);}});
+
+    }).catch(e=>{if(live&&e.name!=='AbortError'){setLoading(false);setSnapshotFailed(true);handleError(e);}});
     return()=>{live=false;controller.abort();};
   },[selected,tick,handleError,gpuOpen]);
   function choose(id:string){setGpuOpen(false);if(id!==selected)setThread(null);setSelected(id);setMobileNav(false);setDialog(null);}
   async function older(){
     if(!messages[0]||loadingOlder)return;setLoadingOlder(true);
     const requested=selected,oldHeight=list.current?.scrollHeight||0,oldTop=list.current?.scrollTop||0;
-    try{const page=await api<Page>(`/channels/${selected}/messages?before=${messages[0].id}`);if(selectedRef.current!==requested)return;historyPages.current+=1;setMessages(v=>[...page.messages,...v.filter(m=>!page.messages.some(p=>p.id===m.id))]);setHasMore(page.hasMore);requestAnimationFrame(()=>{if(list.current)list.current.scrollTop=oldTop+list.current.scrollHeight-oldHeight;});}catch(e){handleError(e);}finally{setLoadingOlder(false);}
+    try{const page=await api<Page>(`/channels/${selected}/messages?before=${messages[0].id}`);if(selectedRef.current!==requested)return;historyPages.current+=1;setMessages(v=>mergeMessages(v,page.messages));setHasMore(page.hasMore);requestAnimationFrame(()=>{if(list.current)list.current.scrollTop=oldTop+list.current.scrollHeight-oldHeight;});}catch(e){handleError(e);}finally{setLoadingOlder(false);}
   }
   async function jump(message:Message){
     choose(message.channel_id);
@@ -95,13 +119,13 @@ function Workspace({me,config,onLogout}:{me:User;config:AuthConfig;onLogout:()=>
       {gpuOpen?<GpuResources me={me} onChannel={choose} onMenu={()=>setMobileNav(true)} onError={handleError}/>:channel?<><header className="channel-header"><button className="mobile-menu icon-button" aria-label="채널 목록 열기" onClick={()=>setMobileNav(true)}><Menu size={21}/></button><div className="channel-heading" key={channel.id}><h2>{channelIcon(channel,23)}{channelName(channel,me)}</h2><p>{channel.kind==='dm'?'우리 사이의 대화와 아이디어':channel.topic||'함께 이야기를 시작해 보세요'}</p></div><button className="member-stack" aria-label="채널 구성원" onClick={()=>setDialog('members')}><span>{channel.members.slice(0,3).map(u=><Avatar user={u} small key={u.id}/>)}</span><b>{channel.members.length}</b></button></header>
       <div className="channel-tabs"><button className="active"><MessageSquare size={15}/> 메시지</button><button onClick={()=>setDialog('pins')}><Pin size={15}/> 고정 메시지</button><span>{channel.kind==='private'?<><Lock size={12}/> 비공개 채널</>:channel.kind==='dm'?<><Lock size={12}/> 두 사람만의 대화</>:<><Hash size={13}/> 연구실 공개 채널</>}</span></div>
       <div className="message-list" ref={list} aria-label="채널 메시지">
-        {loading?<div className="inline-loading"><LoaderCircle className="spin" size={22}/> 대화 불러오는 중</div>:<>{hasMore?<button className="load-older" disabled={loadingOlder} onClick={()=>void older()}>{loadingOlder?'불러오는 중…':'이전 메시지 불러오기'}</button>:<div className="channel-intro"><div className="intro-icon">{channelIcon(channel,30)}</div><h2>{channelName(channel,me)}<span>의 시작</span></h2><p>{channel.kind==='dm'?'생각을 나누고 함께 다음 걸음을 정해 보세요.':channel.topic||'이 채널에서 새로운 대화를 시작해 보세요.'}</p>{config.mode==='demo'&&<span className="demo-notice">지금 보이는 대화는 체험용 샘플입니다.</span>}</div>}
+        {snapshotFailed&&<button className="load-older" onClick={()=>setTick(t=>t+1)}>대화 다시 불러오기</button>}{loading?<div className="inline-loading"><LoaderCircle className="spin" size={22}/> 대화 불러오는 중</div>:<>{hasMore?<button className="load-older" disabled={loadingOlder} onClick={()=>void older()}>{loadingOlder?'불러오는 중…':'이전 메시지 불러오기'}</button>:<div className="channel-intro"><div className="intro-icon">{channelIcon(channel,30)}</div><h2>{channelName(channel,me)}<span>의 시작</span></h2><p>{channel.kind==='dm'?'생각을 나누고 함께 다음 걸음을 정해 보세요.':channel.topic||'이 채널에서 새로운 대화를 시작해 보세요.'}</p>{config.mode==='demo'&&<span className="demo-notice">지금 보이는 대화는 체험용 샘플입니다.</span>}</div>}
         {messages.map((m,i)=><div key={m.id}>{(i===0||dateLabel(messages[i-1].created_at)!==dateLabel(m.created_at))&&<div className="date-divider"><span>{dateLabel(m.created_at)}</span></div>}<MessageRow message={m} me={me} onThread={setThread} onChange={refresh} onError={handleError}/></div>)}
         {!messages.length&&<div className="empty-conversation"><span>👋</span><p>첫 메시지로 공간을 채워 보세요.</p></div>}</>}
-      </div><Composer key={channel.id} channelId={channel.id} label={channel.kind==='dm'?channelName(channel,me):`#${channel.name}`} members={channel.members} onError={handleError} onSent={()=>{scrollToEnd.current=true;refresh();}}/>
+      </div><Composer key={channel.id} channelId={channel.id} label={channel.kind==='dm'?channelName(channel,me):`#${channel.name}`} members={channel.members} onError={handleError} onSent={message=>{scrollToEnd.current=true;setMessages(ms=>mergeMessages(ms,[message]));requestAnimationFrame(()=>{if(list.current)list.current.scrollTop=list.current.scrollHeight;});refresh();}}/>
       </>:<div className="loading-page"><LoaderCircle className="spin"/><p>채널을 준비하고 있어요.</p></div>}
     </main>
-    {!gpuOpen&&thread&&channel&&<ThreadPanel key={thread.id} parent={thread} channel={channel} me={me} tick={tick} onClose={()=>setThread(null)} onChange={refresh} onError={handleError}/>}
+    {!gpuOpen&&thread&&channel&&<ThreadPanel key={`${thread.id}:${tick}`} parent={thread} channel={channel} me={me} delta={threadDelta} onRead={markRead} onClose={()=>setThread(null)} onChange={refresh} onError={handleError}/>}
     </div>
     {error&&<div className="toast" role="alert"><span>{error}</span><button className="icon-button" aria-label="알림 닫기" onClick={()=>setError('')}><X size={16}/></button></div>}
     {dialog==='channel'&&<CreateChannel users={users} me={me} onClose={()=>setDialog(null)} onCreated={id=>{refresh();choose(id);}}/>}
@@ -115,12 +139,31 @@ function Workspace({me,config,onLogout}:{me:User;config:AuthConfig;onLogout:()=>
   </div>;
 }
 
-function ThreadPanel({parent,channel,me,tick,onClose,onChange,onError}:{parent:Message;channel:Channel;me:User;tick:number;onClose:()=>void;onChange:()=>void;onError:(e:unknown)=>void}){
+// Retry failed snapshots on connectivity/focus changes without periodic full reloads.
+function useFailedSnapshotRecovery(failed:boolean,retry:()=>void){
+  const action=useRef(retry);action.current=retry;
+  useEffect(()=>{
+    if(!failed)return;
+    const recover=()=>{if(document.visibilityState==='visible')action.current();};
+    window.addEventListener('online',recover);window.addEventListener('focus',recover);document.addEventListener('visibilitychange',recover);
+    return()=>{window.removeEventListener('online',recover);window.removeEventListener('focus',recover);document.removeEventListener('visibilitychange',recover);};
+  },[failed]);
+}
+
+function ThreadPanel({parent,channel,me,delta,onRead,onClose,onChange,onError}:{parent:Message;channel:Channel;me:User;delta:Message[];onRead:(id:string,until:number)=>Promise<void>;onClose:()=>void;onChange:()=>void;onError:(e:unknown)=>void}){
   const [loaded,setLoaded]=useState(false),[root,setRoot]=useState(parent),[replies,setReplies]=useState<Message[]>([]),[hasMore,setHasMore]=useState(false),[busy,setBusy]=useState(false);const list=useRef<HTMLDivElement>(null);
+  const [snapshotFailed,setSnapshotFailed]=useState(false),[attempt,setAttempt]=useState(0);
+  useFailedSnapshotRecovery(snapshotFailed,()=>setAttempt(n=>n+1));
   useMessageArrival(list,replies,String(parent.id),loaded);
-  useEffect(()=>{let live=true;Promise.all([api<Message>(`/messages/${parent.id}`),api<Page>(`/messages/${parent.id}/replies`)]).then(async([r,p])=>{if(live){const bottom=!list.current||list.current.scrollHeight-list.current.scrollTop-list.current.clientHeight<120;setRoot(r);setReplies(p.messages);setHasMore(p.hasMore);setLoaded(true);const until=p.messages.at(-1)?.id;if(until&&await canMarkRead()&&live)void post(`/channels/${parent.channel_id}/read`,{until}).catch(onError);if(bottom)requestAnimationFrame(()=>{if(list.current)list.current.scrollTop=list.current.scrollHeight;});}}).catch(onError);return()=>{live=false;};},[parent.id,tick,onError]);
-  async function older(){setBusy(true);try{const page=await api<Page>(`/messages/${parent.id}/replies?before=${replies[0].id}`);setReplies(r=>[...page.messages,...r]);setHasMore(page.hasMore);}catch(e){onError(e);}finally{setBusy(false);}}
-  return <aside className="thread-panel" aria-label="스레드"><header><div><h2>스레드</h2><span>{channelName(channel,me)}</span></div><button className="icon-button" aria-label="스레드 닫기" onClick={onClose}><X size={20}/></button></header><div className="thread-list" ref={list}><MessageRow message={root} me={me} onThread={()=>{}} onChange={onChange} onError={onError} thread/><div className="reply-divider">답글 {root.reply_count}개</div>{hasMore&&<button className="load-older" disabled={busy} onClick={()=>void older()}>이전 답글 불러오기</button>}{replies.map(m=><MessageRow key={m.id} message={m} me={me} onThread={()=>{}} onChange={onChange} onError={onError} thread/>)}</div><Composer channelId={parent.channel_id} parentId={parent.id} label="스레드" members={channel.members} onError={onError} onSent={onChange}/></aside>;
+  useEffect(()=>{let live=true;setSnapshotFailed(false);const controller=new AbortController();Promise.all([api<Message>(`/messages/${parent.id}`,{signal:controller.signal}),api<Page>(`/messages/${parent.id}/replies`,{signal:controller.signal})]).then(([r,p])=>{if(live){setRoot(old=>(old.revision??0)>(r.revision??0)?old:r);setReplies(old=>mergeMessages(old,p.messages));setHasMore(p.hasMore);setLoaded(true);requestAnimationFrame(()=>{if(list.current)list.current.scrollTop=list.current.scrollHeight;});}}).catch(e=>{if(live){setSnapshotFailed(true);onError(e);}});return()=>{live=false;controller.abort();};},[parent.id,onError,attempt]);
+  useEffect(()=>{
+    const r=delta.find(m=>m.id===parent.id);if(r)setRoot(old=>(old.revision??0)>(r.revision??0)?old:r);
+    const changed=delta.filter(m=>m.parent_id===parent.id);
+    if(changed.length){const bottom=!list.current||list.current.scrollHeight-list.current.scrollTop-list.current.clientHeight<120;setReplies(old=>mergeMessages(old,changed));if(bottom)requestAnimationFrame(()=>{if(list.current)list.current.scrollTop=list.current.scrollHeight;});}
+  },[delta,parent.id]);
+  useEffect(()=>{const read=()=>void onRead(parent.channel_id,replies.at(-1)?.id??0);read();window.addEventListener('focus',read);document.addEventListener('visibilitychange',read);return()=>{window.removeEventListener('focus',read);document.removeEventListener('visibilitychange',read);};},[parent.channel_id,replies,onRead]);
+  async function older(){setBusy(true);try{const page=await api<Page>(`/messages/${parent.id}/replies?before=${replies[0].id}`);setReplies(r=>mergeMessages(r,page.messages));setHasMore(page.hasMore);}catch(e){onError(e);}finally{setBusy(false);}}
+  return <aside className="thread-panel" aria-label="스레드"><header><div><h2>스레드</h2><span>{channelName(channel,me)}</span></div><button className="icon-button" aria-label="스레드 닫기" onClick={onClose}><X size={20}/></button></header><div className="thread-list" ref={list}>{snapshotFailed&&<button className="load-older" onClick={()=>setAttempt(n=>n+1)}>답글 다시 불러오기</button>}<MessageRow message={root} me={me} onThread={()=>{}} onChange={onChange} onError={onError} thread/><div className="reply-divider">답글 {root.reply_count}개</div>{hasMore&&<button className="load-older" disabled={busy} onClick={()=>void older()}>이전 답글 불러오기</button>}{replies.map(m=><MessageRow key={m.id} message={m} me={me} onThread={()=>{}} onChange={onChange} onError={onError} thread/>)}</div><Composer channelId={parent.channel_id} parentId={parent.id} label="스레드" members={channel.members} onError={onError} onSent={message=>{setReplies(r=>mergeMessages(r,[message]));onChange();}}/></aside>;
 }
 
 function CreateChannel({users,me,onClose,onCreated}:{users:User[];me:User;onClose:()=>void;onCreated:(id:string)=>void}){

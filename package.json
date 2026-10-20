@@ -9,12 +9,15 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "dev:server": "node --watch server/index.mjs",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && npm run audit:size",
     "start": "node --env-file-if-exists=.env server/index.mjs",
     "demo": "LAB_AUTH_MODE=demo LAB_DATA_DIR=.data/demo node server/index.mjs",
     "test": "node --test test/*.test.mjs",
     "test:browser": "playwright test",
-    "backup": "node scripts/backup.mjs"
+    "backup": "node scripts/backup.mjs",
+    "audit:size": "node scripts/audit-size.mjs",
+    "audit:storage": "node scripts/audit-size.mjs --storage",
+    "measure:network": "node scripts/measure-network.mjs"
   },
   "dependencies": {
     "express": "5.3.0",

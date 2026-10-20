@@ -2,11 +2,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import {installSyncSchema} from './sync.mjs';
 
 export function openDatabase(directory) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(join(directory, 'lab-chat.sqlite'));
-  if(db.prepare('PRAGMA user_version').get().user_version>4){db.close();throw new Error('Database schema is newer than this application.');}
+  if(db.prepare('PRAGMA user_version').get().user_version>5){db.close();throw new Error('Database schema is newer than this application.');}
   db.exec(`
     PRAGMA journal_mode=WAL;
     PRAGMA foreign_keys=ON;
@@ -96,8 +97,8 @@ export function openDatabase(directory) {
       amount REAL NOT NULL CHECK(amount>=0), currency TEXT NOT NULL CHECK(currency IN ('USD','KRW')),
       updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL REFERENCES users(id), version INTEGER NOT NULL DEFAULT 1
     );
-    PRAGMA user_version=4;
   `);
+  transaction(db,()=>{installSyncSchema(db);db.exec('PRAGMA user_version=5');});
   return db;
 }
 

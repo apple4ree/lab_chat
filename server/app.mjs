@@ -1,9 +1,9 @@
 import express from 'express';
 import helmet from 'helmet';
 import multer from 'multer';
-import { mkdirSync, unlinkSync, existsSync } from 'node:fs';
+import { mkdirSync, unlinkSync, existsSync, createReadStream } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual, createHash } from 'node:crypto';
 import { openDatabase, transaction, createUser, createChannel, publicUser, seedDemo } from './db.mjs';
 import { token, hashToken, hashPassword, verifyPassword, getSession, startSession, rateLimiter } from './auth.mjs';
 import {createDemoGate} from './demo-gate.mjs';
@@ -11,6 +11,8 @@ import {createGpuMonitor} from './gpu.mjs';
 import {createResources,mountResources} from './resources.mjs';
 import {createResourceSource} from './resource-source.mjs';
 import {mountDesktopReleases} from './desktop-releases.mjs';
+import {createSync,streamWriter} from './sync.mjs';
+import {createMetrics} from './metrics.mjs';
 
 class HttpError extends Error { constructor(status,message) { super(message); this.status=status; } }
 const fail=(status,message)=>{ throw new HttpError(status,message); };
@@ -47,10 +49,12 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   db.prepare("INSERT OR IGNORE INTO app_meta VALUES ('auth_mode',?)").run(mode);
   mkdirSync(uploads,{recursive:true,mode:0o700});
   if (mode==='demo') seedDemo(db);
-  const app=express(), clients=new Set(), secure=origin.startsWith('https://');
+  const app=express(), clients=new Set(), secure=origin.startsWith('https://'), sync=createSync(db);
+  const metrics=createMetrics();
   app.disable('x-powered-by');
   app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'","'unsafe-inline'"],imgSrc:["'self'",'data:'],connectSrc:["'self'"],upgradeInsecureRequests:secure?[]:null}},strictTransportSecurity:secure?undefined:false}));
   if(demoGate)app.use(demoGate);
+  app.use('/api',metrics.middleware);
   app.use('/api',(req,res,next)=>{
     res.set('Cache-Control','no-store');
     if (!['GET','HEAD','OPTIONS'].includes(req.method)) {
@@ -78,17 +82,18 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
     if (!message || !membership(req.user.id,message.channel_id)) fail(404,'메시지를 찾을 수 없습니다.');
     return message;
   };
-  function emit(channelId=null,userIds=null) {
+  function emit(channelId=null,userIds=null,excludeSession=null) {
     for (const client of clients) {
       const valid=db.prepare('SELECT 1 FROM sessions WHERE token_hash=? AND expires_at>?').get(client.sessionHash,Date.now());
       if (!valid) { client.res.end(); clients.delete(client); continue; }
+      if(client.sessionHash===excludeSession)continue;
       if ((userIds && !userIds.includes(client.userId)) || (channelId && !membership(client.userId,channelId))) continue;
-      client.res.write(`event: refresh\ndata: ${JSON.stringify({channelId})}\n\n`);
+      client.writer.write(`event: refresh\ndata: ${JSON.stringify({channelId,cursor:sync.cursor()})}\n\n`);
     }
   }
   function decorate(message,viewerId) {
     const user=db.prepare('SELECT id,name,handle,role FROM users WHERE id=?').get(message.user_id);
-    return {...message,user,files:message.deleted?[]:db.prepare('SELECT id,original_name AS name,size FROM files WHERE message_id=?').all(message.id),
+    return {...message,revision:sync.head(),user,files:message.deleted?[]:db.prepare('SELECT id,original_name AS name,size FROM files WHERE message_id=?').all(message.id),
       reactions:message.deleted?[]:db.prepare('SELECT emoji,count(*) AS count,max(user_id=?) AS mine FROM reactions WHERE message_id=? GROUP BY emoji ORDER BY emoji').all(viewerId,message.id),
       reply_count:db.prepare('SELECT count(*) AS n FROM messages WHERE parent_id=?').get(message.id).n};
   }
@@ -152,7 +157,15 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
     startSession(db,res,user,secure);emit();res.status(201).json(publicUser(user));
   });
   app.use('/api',requireAuth);
-  app.get('/api/resources/gpus',(_req,res)=>res.json(gpu.view()));
+  app.get('/api/admin/metrics',(req,res)=>{admin(req);res.json({...metrics.snapshot(),streams:{active:clients.size,bufferedBytes:[...clients].reduce((sum,c)=>sum+c.res.writableLength,0)},sync:{retainedChanges:db.prepare('SELECT count(*) n FROM sync_changes').get().n}});});
+  app.get('/api/resources/gpus',(req,res)=>{
+    // Validate the full view, including freshness/connection metadata. The client
+    // owns a session-local copy; intermediaries must still obey no-store.
+    const body=JSON.stringify(gpu.view()),etag=`"${createHash('sha256').update(body).digest('base64url')}"`;
+    res.set('ETag',etag);
+    if(req.get('If-None-Match')===etag)return res.status(304).end();
+    res.type('json').send(body);
+  });
   mountResources(app,resources);
   mountDesktopReleases(app,desktopReleaseDir);
   app.get('/api/me',(req,res)=>res.json({...publicUser(req.user),email:req.user.email}));
@@ -188,13 +201,39 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
       fileBytes:db.prepare('SELECT coalesce(sum(size),0) AS n FROM files').get().n,
       audit:db.prepare('SELECT a.*,u.name AS actor FROM audit_log a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 50').all()});
   });
-  app.get('/api/channels',(req,res)=>{
+  const usersView=()=>db.prepare("SELECT id,name,handle,role FROM users WHERE identity_provider!='system' ORDER BY name").all();
+  function channelsView(userId,only=null){
     const rows=db.prepare(`SELECT c.*,m.last_read_id,
       (SELECT coalesce(max(x.id),0) FROM messages x WHERE x.channel_id=c.id AND x.user_id!=? AND x.deleted=0) AS latest_message_id,
       (SELECT count(*) FROM messages x WHERE x.channel_id=c.id AND x.id>m.last_read_id AND x.user_id!=? AND x.deleted=0) AS unread,
       (SELECT count(*) FROM mentions n JOIN messages x ON n.message_id=x.id WHERE x.channel_id=c.id AND x.id>m.last_read_id AND n.user_id=? AND x.user_id!=? AND x.deleted=0) AS mentions
-      FROM channels c JOIN memberships m ON c.id=m.channel_id WHERE m.user_id=? ORDER BY c.kind,c.created_at,c.name`).all(req.user.id,req.user.id,req.user.id,req.user.id,req.user.id);
-    res.json(rows.map(c=>({...c,members:db.prepare('SELECT u.id,u.name,u.handle,u.role FROM users u JOIN memberships m ON u.id=m.user_id WHERE m.channel_id=? ORDER BY u.name').all(c.id)})));
+      FROM channels c JOIN memberships m ON c.id=m.channel_id WHERE m.user_id=? AND (? IS NULL OR c.id=?) ORDER BY c.kind,c.created_at,c.name`).all(userId,userId,userId,userId,userId,only,only);
+    return rows.map(c=>({...c,members:db.prepare('SELECT u.id,u.name,u.handle,u.role FROM users u JOIN memberships m ON u.id=m.user_id WHERE m.channel_id=? ORDER BY u.name').all(c.id)}));
+  }
+  app.get('/api/channels',(req,res)=>res.json(channelsView(req.user.id)));
+  app.get('/api/sync',(req,res)=>{
+    const batch=sync.read(typeof req.query.cursor==='string'?req.query.cursor:'');
+    const active=typeof req.query.channelId==='string'?req.query.channelId:null;
+    const parent=typeof req.query.threadId==='string'&&/^\d+$/.test(req.query.threadId)?Number(req.query.threadId):null;
+    const usersChanged=batch.reset||batch.changes.some(c=>c.kind==='user');
+    const changedChannels=new Set(),messageIds=new Set(),removedChannelIds=[];
+    for(const change of batch.changes){
+      if(change.kind==='read'&&change.user_id!==req.user.id)continue;
+      const allowed=change.channel_id&&membership(req.user.id,change.channel_id);
+      if(!allowed){if(change.kind==='membership'&&change.user_id===req.user.id)removedChannelIds.push(change.channel_id);continue;}
+      changedChannels.add(change.channel_id);
+      if(change.kind==='message'&&change.channel_id===active){messageIds.add(change.message_id);if(change.parent_id)messageIds.add(change.parent_id);}
+    }
+    const messages=[],threadMessages=[];
+    for(const id of messageIds){
+      const message=db.prepare('SELECT * FROM messages WHERE id=?').get(id);
+      if(!message)continue;
+      if(message.parent_id===null)messages.push(decorate(message,req.user.id));
+      if(parent&&(message.id===parent||message.parent_id===parent))threadMessages.push(decorate(message,req.user.id));
+    }
+    res.json({cursor:batch.cursor,reset:batch.reset,
+      channels:usersChanged?channelsView(req.user.id):[...changedChannels].flatMap(id=>channelsView(req.user.id,id)),
+      removedChannelIds,users:usersChanged?usersView():undefined,messages,threadMessages});
   });
   app.post('/api/channels',(req,res)=>{
     const name=string(req.body.name,'채널 이름',60),topic=typeof req.body.topic==='string'?string(req.body.topic,'설명',250,0):'';
@@ -226,7 +265,8 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
     channelFor(req,req.params.id);
     const until=integer(req.body.until);
     if(!db.prepare('SELECT 1 FROM messages WHERE id=? AND channel_id=?').get(until,req.params.id)) fail(400,'채널의 메시지를 지정해 주세요.');
-    db.prepare('UPDATE memberships SET last_read_id=max(last_read_id,?) WHERE channel_id=? AND user_id=?').run(until,req.params.id,req.user.id);
+    const changed=db.prepare('UPDATE memberships SET last_read_id=? WHERE channel_id=? AND user_id=? AND last_read_id<?').run(until,req.params.id,req.user.id,until).changes;
+    if(changed)emit(req.params.id,[req.user.id],req.user.session_hash);
     res.status(204).end();
   });
   app.get('/api/channels/:id/messages',(req,res)=>{
@@ -245,12 +285,19 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
     const before=req.query.before?integer(req.query.before):Number.MAX_SAFE_INTEGER;
     res.json(page(db.prepare('SELECT * FROM messages WHERE parent_id=? AND id<? ORDER BY id DESC LIMIT 81').all(parent.id,before),req.user.id));
   });
-  function insertMessage(req,file=null) {
+  function insertMessage(req,file=null,fileDigest=null) {
     const channel=channelFor(req,req.params.id);
     const body=string(req.body.body??'','메시지',16000,file?0:1);
     const parent=req.body.parentId?messageFor(req,req.body.parentId):null;
     if(parent && (parent.channel_id!==channel.id||parent.parent_id)) fail(400,'동일한 채널의 원문에 답글을 작성해 주세요.');
+    const clientId=req.body.clientMessageId??null;
+    if(clientId!==null&&(typeof clientId!=='string'||!/^[a-zA-Z0-9_-]{16,100}$/.test(clientId)))fail(400,'전송 식별자를 확인해 주세요.');
+    const fingerprint=createHash('sha256').update(JSON.stringify([channel.id,body,parent?.id??null,file?[fileDigest,file.originalname,file.size]:null])).digest('hex');
     return transaction(db,()=>{
+      if(clientId){
+        const prior=db.prepare('SELECT * FROM send_requests WHERE user_id=? AND client_id=?').get(req.user.id,clientId);
+        if(prior){if(prior.fingerprint!==fingerprint)fail(409,'같은 전송 식별자로 다른 내용을 보낼 수 없습니다.');return {message:db.prepare('SELECT * FROM messages WHERE id=?').get(prior.message_id),replayed:true};}
+      }
       const id=Number(db.prepare('INSERT INTO messages (channel_id,user_id,parent_id,body) VALUES (?,?,?,?)').run(channel.id,req.user.id,parent?.id??null,body).lastInsertRowid);
       if(file) {
         // Original names are metadata only; disk paths are server-generated UUIDs.
@@ -258,19 +305,25 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
         db.prepare('INSERT INTO files VALUES (?,?,?,?,?)').run(randomUUID(),id,name,file.filename,file.size);
       }
       mentionUsers(id,channel.id,body);
-      return db.prepare('SELECT * FROM messages WHERE id=?').get(id);
+      if(clientId)db.prepare('INSERT INTO send_requests VALUES (?,?,?,?)').run(req.user.id,clientId,fingerprint,id);
+      return {message:db.prepare('SELECT * FROM messages WHERE id=?').get(id),replayed:false};
     });
   }
   const messageLimit=rateLimiter({limit:120,windowMs:60000});
   app.post('/api/channels/:id/messages',messageLimit,(req,res)=>{
-    const message=insertMessage(req);emit(message.channel_id);res.status(201).json(decorate(message,req.user.id));
+    const {message,replayed}=insertMessage(req);if(!replayed)emit(message.channel_id);res.status(201).json(decorate(message,req.user.id));
   });
-  const upload=multer({storage:multer.diskStorage({destination:uploads,filename:(_req,_file,cb)=>cb(null,randomUUID())}),limits:{fileSize:20*1024*1024,files:1,fields:2,fieldSize:64000,parts:3}});
-  app.post('/api/channels/:id/files',messageLimit,(req,_res,next)=>{channelFor(req,req.params.id);next();},upload.single('file'),(req,res)=>{
+  const upload=multer({storage:multer.diskStorage({destination:uploads,filename:(_req,_file,cb)=>cb(null,randomUUID())}),limits:{fileSize:20*1024*1024,files:1,fields:3,fieldSize:64000,parts:4}});
+  app.post('/api/channels/:id/files',messageLimit,(req,_res,next)=>{channelFor(req,req.params.id);next();},upload.single('file'),async(req,res,next)=>{
+    let temporary=true;
     try {
       if(!req.file) fail(400,'파일을 선택해 주세요.');
-      const message=insertMessage(req,req.file);emit(message.channel_id);res.status(201).json(decorate(message,req.user.id));
-    } catch(error) { if(req.file) unlinkSync(req.file.path);throw error; }
+      const hash=createHash('sha256');for await(const chunk of createReadStream(req.file.path))hash.update(chunk);
+      const {message,replayed}=insertMessage(req,req.file,hash.digest('hex'));
+      if(replayed)unlinkSync(req.file.path);
+      temporary=false; // A committed file belongs to the message, even if delivery fails.
+      if(!replayed)emit(message.channel_id);res.status(201).json(decorate(message,req.user.id));
+    } catch(error) { if(temporary&&req.file&&existsSync(req.file.path))unlinkSync(req.file.path);next(error); }
   });
   app.get('/api/files/:id',(req,res)=>{
     const file=db.prepare('SELECT f.*,m.channel_id,m.deleted FROM files f JOIN messages m ON m.id=f.message_id WHERE f.id=?').get(req.params.id);
@@ -327,16 +380,18 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   app.get('/api/events',(req,res)=>{
     if([...clients].filter(c=>c.userId===req.user.id).length>=10) fail(429,'열린 창이 너무 많습니다. 사용하지 않는 창을 닫아 주세요.');
     res.set({'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive','X-Accel-Buffering':'no'});res.flushHeaders();
-    res.write('event: ready\ndata: {}\n\n');
-    const client={res,userId:req.user.id,sessionHash:req.user.session_hash};clients.add(client);
+    res.write(`retry: ${2000+Math.floor(Math.random()*2000)}\nevent: ready\ndata: {}\n\n`);
+    const writer=streamWriter(res);
+    const client={res,writer,userId:req.user.id,sessionHash:req.user.session_hash};clients.add(client);
     const heartbeat=setInterval(()=>{
       if(!db.prepare('SELECT 1 FROM sessions WHERE token_hash=? AND expires_at>?').get(client.sessionHash,Date.now())) {res.end();return;}
-      res.write(': heartbeat\n\n');
+      writer.write(': heartbeat\n\n');
     },20000);
-    req.on('close',()=>{clearInterval(heartbeat);clients.delete(client);});
+    req.on('close',()=>{clearInterval(heartbeat);writer.stop();clients.delete(client);});
   });
   app.use('/api',(_req,res)=>res.status(404).json({error:'요청한 기능을 찾을 수 없습니다.'}));
   if(existsSync(distDir)) {
+    app.use('/assets',express.static(join(distDir,'assets'),{index:false,maxAge:'1y',immutable:true}));
     app.use(express.static(distDir,{index:false,maxAge:0}));
     app.get('/{*splat}',(_req,res)=>res.sendFile(join(distDir,'index.html')));
   }
@@ -349,5 +404,5 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   });
   const closeStreams=()=>{for(const c of clients)c.res.end();};
   let closed=false;
-  return {app,db,setupToken,gpu,resources,closeStreams,close:()=>{if(closed)return;closed=true;resources.stop();void gpu.stop();closeStreams();db.close();}};
+  return {app,db,setupToken,gpu,resources,closeStreams,close:()=>{if(closed)return;closed=true;metrics.close();resources.stop();void gpu.stop();closeStreams();db.close();}};
 }

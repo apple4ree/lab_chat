@@ -1,6 +1,6 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import {Cpu,RefreshCw,Bell,Menu,Server,Activity,Clock,AlertTriangle} from 'lucide-react';
-import {api,type User} from './api';
+import {api,type User,type ResponseCache} from './api';
 import {ResourceHistory,ResourceAccounts} from './ResourceAnalytics';
 import {ResourceReservations} from './ResourceReservations';
 
@@ -13,13 +13,14 @@ const stamp=(value:number|null)=>value?new Date(value).toLocaleString('ko-KR',{m
 
 export function GpuResources({me,onChannel,onMenu,onError}:{me:User;onChannel:(id:string)=>void;onMenu:()=>void;onError:(e:unknown)=>void}){
   const [tab,setTab]=useState('live');
+  const snapshot=useRef<ResponseCache>({});
   const [data,setData]=useState<Inventory|null>(null),[filter,setFilter]=useState('all'),[host,setHost]=useState('all'),[loading,setLoading]=useState(false),[error,setError]=useState(''),[refresh,setRefresh]=useState(0);
   useEffect(()=>{
     let live=true,controller:AbortController|null=null;
     async function load(){
       if(document.visibilityState==='hidden')return;
       controller?.abort();controller=new AbortController();setLoading(true);
-      try{const next=await api<Inventory>('/resources/gpus',{signal:controller.signal});if(live){setData(next);setError('');}}
+      try{const next=await api<Inventory>('/resources/gpus',{signal:controller.signal,cacheEntry:snapshot.current});if(live){setData(next);setError('');}}
       catch(e){if(live&&(e as Error).name!=='AbortError'){setError('GPU 현황을 불러오지 못했습니다. 마지막 화면은 최신 상태가 아닙니다.');onError(e);}}
       finally{if(live)setLoading(false);}
     }

@@ -34,16 +34,19 @@ export function MessageRow({message:m,me,onThread,onChange,onError,thread=false}
 
 export function Composer({channelId,parentId,label,members,onSent,onError}:{channelId:string;parentId?:number;label:string;members:User[];onSent:(m:Message)=>void;onError:(e:unknown)=>void}){
   const [body,setBody]=useState(''),[file,setFile]=useState<File|null>(null),[busy,setBusy]=useState(false),[showMentions,setShowMentions]=useState(false),[emoji,setEmoji]=useState(false),[sent,setSent]=useState(false);
+  const pendingSend=useRef<{body:string;file:File|null;id:string}|null>(null);
   const input=useRef<HTMLInputElement>(null),textarea=useRef<HTMLTextAreaElement>(null);
   useEffect(()=>{if(!sent)return;textarea.current?.focus();const timer=setTimeout(()=>setSent(false),1800);return()=>clearTimeout(timer);},[sent]);
   async function send(){
     if(busy||(!body.trim()&&!file))return;
     setBusy(true);setSent(false);
+    if(!pendingSend.current||pendingSend.current.body!==body||pendingSend.current.file!==file)pendingSend.current={body,file,id:crypto.randomUUID()};
+    const clientMessageId=pendingSend.current.id;
     try{
       let message:Message;
-      if(file){const form=new FormData();form.set('file',file);form.set('body',body);if(parentId)form.set('parentId',String(parentId));message=await api<Message>(`/channels/${channelId}/files`,{method:'POST',body:form});}
-      else message=await post<Message>(`/channels/${channelId}/messages`,{body,parentId});
-      setBody('');setFile(null);setShowMentions(false);setEmoji(false);setSent(true);onSent(message);
+      if(file){const form=new FormData();form.set('file',file);form.set('body',body);form.set('clientMessageId',clientMessageId);if(parentId)form.set('parentId',String(parentId));message=await api<Message>(`/channels/${channelId}/files`,{method:'POST',body:form,retry:true,timeoutMs:120000});}
+      else message=await post<Message>(`/channels/${channelId}/messages`,{body,parentId,clientMessageId},{retry:true});
+      pendingSend.current=null;setBody('');setFile(null);setShowMentions(false);setEmoji(false);setSent(true);onSent(message);
     }catch(e){onError(e);}finally{setBusy(false);}
   }
   return <div className="composer-wrap"><form className="composer" onSubmit={e=>{e.preventDefault();void send();}}>
