@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState,type ReactNode} from 'react';
-import {X,Paperclip,Send,Smile,MessageSquare,Pin,Pencil,Trash2,FileText,AtSign,LoaderCircle} from 'lucide-react';
+import {X,Paperclip,Send,Smile,MessageSquare,Pin,Pencil,Trash2,FileText,AtSign,LoaderCircle,Check} from 'lucide-react';
 import {api,post,type User,type Message} from './api';
 
 export function Avatar({user,small=false}:{user:User;small?:boolean}){
@@ -33,16 +33,17 @@ export function MessageRow({message:m,me,onThread,onChange,onError,thread=false}
 }
 
 export function Composer({channelId,parentId,label,members,onSent,onError}:{channelId:string;parentId?:number;label:string;members:User[];onSent:(m:Message)=>void;onError:(e:unknown)=>void}){
-  const [body,setBody]=useState(''),[file,setFile]=useState<File|null>(null),[busy,setBusy]=useState(false),[showMentions,setShowMentions]=useState(false),[emoji,setEmoji]=useState(false);
+  const [body,setBody]=useState(''),[file,setFile]=useState<File|null>(null),[busy,setBusy]=useState(false),[showMentions,setShowMentions]=useState(false),[emoji,setEmoji]=useState(false),[sent,setSent]=useState(false);
   const input=useRef<HTMLInputElement>(null),textarea=useRef<HTMLTextAreaElement>(null);
+  useEffect(()=>{if(!sent)return;textarea.current?.focus();const timer=setTimeout(()=>setSent(false),1800);return()=>clearTimeout(timer);},[sent]);
   async function send(){
     if(busy||(!body.trim()&&!file))return;
-    setBusy(true);
+    setBusy(true);setSent(false);
     try{
       let message:Message;
       if(file){const form=new FormData();form.set('file',file);form.set('body',body);if(parentId)form.set('parentId',String(parentId));message=await api<Message>(`/channels/${channelId}/files`,{method:'POST',body:form});}
       else message=await post<Message>(`/channels/${channelId}/messages`,{body,parentId});
-      setBody('');setFile(null);setShowMentions(false);setEmoji(false);onSent(message);textarea.current?.focus();
+      setBody('');setFile(null);setShowMentions(false);setEmoji(false);setSent(true);onSent(message);
     }catch(e){onError(e);}finally{setBusy(false);}
   }
   return <div className="composer-wrap"><form className="composer" onSubmit={e=>{e.preventDefault();void send();}}>
@@ -51,5 +52,5 @@ export function Composer({channelId,parentId,label,members,onSent,onError}:{chan
     {showMentions&&<div className="mention-picker">{members.map(u=><button type="button" key={u.id} onClick={()=>{setBody(v=>v+`@${u.handle} `);setShowMentions(false);textarea.current?.focus();}}><Avatar user={u} small/><span>{u.name}<small>@{u.handle}</small></span></button>)}</div>}
     {emoji&&<div className="composer-emojis">{['👋','✨','🌱','👍','📚','🧪','✅','🎉'].map(e=><button type="button" key={e} onClick={()=>{setBody(v=>v+e);setEmoji(false);textarea.current?.focus();}}>{e}</button>)}</div>}
     <div className="composer-toolbar"><div><input type="file" ref={input} hidden onChange={e=>{const f=e.target.files?.[0];if(f){if(f.size>20*1024*1024)onError(new Error('파일은 20MB까지 첨부할 수 있습니다.'));else setFile(f);}e.target.value='';}}/><button type="button" className="icon-button" aria-label="파일 첨부" title="파일 첨부 · 최대 20MB" disabled={busy} onClick={()=>input.current?.click()}><Paperclip size={18}/></button><button type="button" className="icon-button" aria-label="이모지" onClick={()=>setEmoji(!emoji)}><Smile size={18}/></button><button type="button" className="icon-button" aria-label="구성원 멘션" onClick={()=>setShowMentions(!showMentions)}><AtSign size={18}/></button></div><button className="send-button" aria-label={parentId?'답글 보내기':'메시지 보내기'} disabled={busy||(!body.trim()&&!file)}>{busy?<LoaderCircle size={17} className="spin"/>:<Send size={17}/>}<span>보내기</span></button></div>
-  </form><div className="composer-hint"><span>대화가 쌓이면, 연구의 맥락이 됩니다.</span><span><b>Enter</b> 전송 · <b>Shift + Enter</b> 줄바꿈</span></div></div>;
+  </form><div className="composer-hint"><span className={sent?'send-confirmation':undefined} ><span role="status" aria-label="메시지 전송 상태" aria-live="polite">{sent?<><Check size={12}/>전송됨</>:null}</span>{!sent&&'대화가 쌓이면, 연구의 맥락이 됩니다.'}</span><span><b>Enter</b> 전송 · <b>Shift + Enter</b> 줄바꿈</span></div></div>;
 }
