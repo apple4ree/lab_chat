@@ -99,3 +99,9 @@ GPU 이력·OS 계정별 집계·예약 신청/수정/검토/승인/배정/취�
 최종 공개 검증: 일반·데모 사이트 모두 로그인 후 세 플랫폼 카드 표시, ZIP 세 개의 HTTP Range 응답 206 및 첫 32바이트 일치, 첨부 다운로드 헤더, manifest의 크기/SHA-256 일치를 확인했습니다. 전체 ZIP은 로컬에서 CRC·SHA-256·내부 소스·아키텍처를 검증했으며, 공개망에서는 범위 응답을 검증했습니다. 로그아웃은 204, 이후 목록과 파일은 모두 401, 브라우저 pageerror는 0건입니다. 화면은 `desktop-public-{local,demo}.png`입니다.
 
 실제 다운로드에서 발견한 `.data` 경로 404를 수정했습니다. 파일 제공 시 저장 루트와 파일명을 분리해 Express에 넘기며, 승인되지 않은 숨김 파일은 계속 거부합니다. 기존 첨부파일 다운로드도 동일한 수정에 포함했습니다. 숨김 디렉터리를 쓰는 API 회귀 테스트 33개와 ZIP Range 응답 검증을 통과했고, 서버 재배포 후 공개 다운로드가 동작했습니다. 최종 users/messages 해시와 DB 무결성은 `desktop-final.json`에서 확인했습니다.
+
+## 2026-10-20 05:37 UTC — EXE·DMG 설치형 0.1.1 배포
+
+기본 다운로드를 Windows x64 NSIS EXE와 macOS Apple Silicon·Intel DMG로 교체했습니다. [GitHub Actions 실행 39375371365](https://github.com/apple4ree/lab_chat/actions/runs/39375371365)의 소스 커밋 `9db04b1e0804e5c2c8d55a9079f112a9c3b4d64f`에서 세 플랫폼 모두 빌드와 네이티브 검증을 통과했습니다. Windows에서는 설치·시작 메뉴·실제 패키지 실행·제거를, Mac에서는 DMG 검증·마운트·Applications 링크·앱 복사·아키텍처·프레임워크 링크·ad-hoc 서명 검증·실제 패키지 실행을 확인했습니다. 모두 운영 로그인 화면과 렌더러 격리를 확인했으며 계정 로그인 없이 실행했습니다. Windows 체크아웃의 CRLF 변환은 `.gitattributes`에서 LF로 통일했습니다. 최종 게시 시 세 파일의 전체 SHA-256과 포함된 런타임 소스를 고정된 Git 커밋과 대조했습니다. 개발자 인증서 서명·Apple 공증·일반 사용자 환경의 SmartScreen/Gatekeeper 승인·자동 업데이트는 검증 또는 제공 범위에 포함되지 않습니다.
+
+기존 화면과 목록 백업은 `.data/installer-backup/2026-10-20T05-28-35.696Z/`에 있습니다. 모든 파일 검증 후 manifest를 원자적으로 교체하고 새 웹 자산과 index를 배포했습니다. 서버 재시작 없이 이전 자산과 0.1.0 ZIP 파일을 보존했습니다. 운영·데모의 실제 Chrome에서 로그인 후 EXE 한 개와 DMG 두 개의 표시, 각 파일의 Range 206·로컬 바이트 일치·다운로드 헤더·DMG 푸터, 로그아웃 후 목록과 파일의 401, 브라우저 예외 0건을 확인했습니다. 공개 HTML은 배포 index와 일치하며 두 DB의 users/messages 해시 유지 및 `integrity_check=ok`를 확인했습니다. 전체 파일 검증은 로컬에서, 공개 전송 검증은 바이트 범위 요청으로 수행했습니다. 증거는 `.data/deploy/evidence/installers-{native-ci,packages,public,final}.json`과 `installers-public-{local,demo}.png`입니다. 로컬 검증은 데스크톱 정책 3개, 게시·다운로드 API 5개, 다운로드 브라우저 시나리오 2개, TypeScript 검사와 Vite 빌드가 통과했습니다.
