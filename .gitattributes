@@ -1,0 +1,5 @@
+# Keep packaged source bytes identical across Windows and macOS checkouts.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
