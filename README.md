@@ -4,7 +4,7 @@
 
 현재 연결 주소: **https://chat.damilab.cc** (일반), **https://chat-demo.damilab.cc** (체험). 접속 정보는 서버의 `.data/deploy/접속정보.txt`, 운영 방법과 공개 주소 검증은 [DEPLOYMENT.md](docs/DEPLOYMENT.md)에 있습니다. 현재 두 서비스는 PM2로 실행 중입니다. 아래 `npm start`는 별도 로컬 실행 안내이며, 운영 중인 포트에 중복 실행하지 않습니다.
 
-데스크톱 시험판: [앱 다운로드](https://chat.damilab.cc/#desktop-downloads) · [Windows/macOS 빌드 및 검증 범위](docs/DESKTOP.md).
+데스크톱 설치판: [앱 다운로드](https://chat.damilab.cc/#desktop-downloads) · [Windows EXE·Mac DMG 빌드 및 검증 범위](docs/DESKTOP.md).
 
 ## 1. 바로 실행
 
