@@ -7,6 +7,6 @@ module.exports={
   publish:null,
   win:{target:[{target:'nsis',arch:['x64']}],icon:'assets/icon.ico',signExecutable:false},
   nsis:{oneClick:false,perMachine:false,allowToChangeInstallationDirectory:true,createDesktopShortcut:true,createStartMenuShortcut:true,deleteAppDataOnUninstall:false},
-  mac:{target:['dmg','zip'],icon:'assets/icon.icns',category:'public.app-category.social-networking',identity:null,hardenedRuntime:true,notarize:false},
+  mac:{target:['dmg'],icon:'assets/icon.icns',category:'public.app-category.social-networking',identity:'-',hardenedRuntime:true,notarize:false},
   linux:{target:['dir'],icon:'assets/icon.png',category:'Network'}
 };

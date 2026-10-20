@@ -1,0 +1,64 @@
+name: Desktop installers
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+permissions:
+  contents: read
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  package:
+    name: ${{ matrix.platform }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: windows, arch: x64, runner: windows-2025, target: win, extension: exe}
+          - {platform: macos, arch: arm64, runner: macos-15, target: mac, extension: dmg}
+          - {platform: macos, arch: x64, runner: macos-15-intel, target: mac, extension: dmg}
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci --no-audit --no-fund
+      - name: Check desktop policies
+        working-directory: desktop
+        run: npm test
+      - name: Build Windows installer
+        if: matrix.platform == 'windows'
+        working-directory: desktop
+        run: npm run dist:win
+      - name: Build Mac disk image
+        if: matrix.platform == 'macos'
+        working-directory: desktop
+        run: npx --no-install electron-builder --mac dmg --${{ matrix.arch }} --publish never
+      - name: Verify native installation and application launch
+        run: node desktop/test/native-package.mjs ${{ matrix.arch }}
+      - name: Upload verified installer and evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            desktop/release/DAMI-Chat-*-${{ matrix.target }}-${{ matrix.arch }}.${{ matrix.extension }}
+            desktop/release/build-info-${{ matrix.platform }}-${{ matrix.arch }}.json
+            desktop/release/native-${{ matrix.platform }}-${{ matrix.arch }}.png
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
