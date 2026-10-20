@@ -1,0 +1,2 @@
+import { defineConfig } from '@playwright/test';
+export default defineConfig({testDir:'./test/browser',workers:1,timeout:40000,expect:{timeout:10000},reporter:'list',use:{baseURL:'http://127.0.0.1:4311',headless:true,launchOptions:{executablePath:process.env.CHROME_PATH||'/usr/bin/google-chrome'},screenshot:'only-on-failure',trace:'retain-on-failure'},webServer:{command:'node test/browser-server.mjs',url:'http://127.0.0.1:4311/api/health',timeout:15000,reuseExistingServer:false}});

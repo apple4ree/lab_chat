@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.data/
+.env
+test-results/
+playwright-report/
+*.log
+desktop/release/
+
+desktop/release-windows/
+
+# Private configuration, data, caches, and desktop build outputs
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+*.db
+__pycache__/
+*.py[cod]
+desktop/release*/

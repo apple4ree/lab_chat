@@ -1,0 +1,12 @@
+# Reference only. No nginx or system service was installed by this project.
+# Put this location inside your existing TLS server block.
+# Set LAB_ORIGIN=https://chat.YOUR-LAB-DOMAIN in the app's .env.
+location / {
+    proxy_pass http://127.0.0.1:4310;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_buffering off;
+    proxy_read_timeout 75s;
+    client_max_body_size 21m;
+}
