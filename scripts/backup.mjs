@@ -1,5 +1,5 @@
 import {DatabaseSync,backup} from 'node:sqlite';
-import {mkdir,copyFile,writeFile,stat,chmod} from 'node:fs/promises';
+import {mkdir,copyFile,writeFile,stat,chmod,lstat} from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -15,12 +15,19 @@ export async function createBackup(sourceDirectory,destinationDirectory){
   try{await backup(live,join(destination,'lab-chat.sqlite'));}finally{live.close();}
   await chmod(join(destination,'lab-chat.sqlite'),0o600);
   const snapshot=new DatabaseSync(join(destination,'lab-chat.sqlite'),{readOnly:true});
-  let files,counts;
+  let files,counts,hasSshCredentials=false;
   try{
     if(snapshot.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')throw new Error('Snapshot integrity check failed.');
     files=snapshot.prepare('SELECT storage_name,size FROM files ORDER BY storage_name').all();
     counts={users:snapshot.prepare('SELECT count(*) AS n FROM users').get().n,messages:snapshot.prepare('SELECT count(*) AS n FROM messages').get().n};
+    hasSshCredentials=!!snapshot.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='server_ssh_connections'").get()&&!!snapshot.prepare('SELECT 1 FROM server_ssh_connections WHERE credential IS NOT NULL LIMIT 1').get();
   }finally{snapshot.close();}
+  // The encrypted credentials and their private key must be restored together.
+  if(hasSshCredentials){
+    const key=join(source,'secrets','ssh-master.key'),info=await lstat(key);
+    if(!info.isFile()||info.isSymbolicLink()||(info.mode&0o077)||info.size!==32)throw new Error('SSH credential backup requires a private 32-byte key file.');
+    await mkdir(join(destination,'secrets'),{mode:0o700});await copyFile(key,join(destination,'secrets','ssh-master.key'));await chmod(join(destination,'secrets','ssh-master.key'),0o600);
+  }
   await mkdir(join(destination,'uploads'),{mode:0o700});
   const manifest=[];
   for(const file of files){
@@ -31,7 +38,7 @@ export async function createBackup(sourceDirectory,destinationDirectory){
     if(size!==file.size)throw new Error('Attachment size mismatch.');
     manifest.push({name:file.storage_name,size,sha256:await sha256(target)});
   }
-  const result={version:1,createdAt:new Date().toISOString(),...counts,files:manifest,databaseSha256:await sha256(join(destination,'lab-chat.sqlite'))};
+  const result={version:1,createdAt:new Date().toISOString(),...counts,files:manifest,sshKeyIncluded:hasSshCredentials,databaseSha256:await sha256(join(destination,'lab-chat.sqlite'))};
   await writeFile(join(destination,'backup-manifest.json'),JSON.stringify(result,null,2)+'\n',{mode:0o600,flag:'wx'});
   return {destination,users:counts.users,messages:counts.messages,files:files.length};
 }

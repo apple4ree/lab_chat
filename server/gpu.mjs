@@ -52,8 +52,9 @@ export function createGpuMonitor({db,source=null,emit=()=>{},history=null,demo=f
   // Restart gaps do not establish continuous availability; retain stable states for deduplication.
   db.prepare("UPDATE gpu_observations SET candidate='',candidate_sample=NULL").run();
   const meta=(key,value)=>db.prepare('INSERT INTO app_meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key,JSON.stringify(value));
+  const sourceEnabled=()=>!!source&&source.enabled!==false;
   function ensureChannel(){
-    if(!source)return null;
+    if(!sourceEnabled())return null;
     const owner=db.prepare("SELECT id FROM users WHERE role='admin' AND identity_provider!='system' ORDER BY created_at LIMIT 1").get();
     if(!owner)return null;
     return transaction(db,()=>{
@@ -91,7 +92,7 @@ export function createGpuMonitor({db,source=null,emit=()=>{},history=null,demo=f
     db.prepare('INSERT INTO gpu_observations(id,stable,candidate,candidate_since,candidate_sample) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET stable=excluded.stable,candidate=excluded.candidate,candidate_since=excluded.candidate_since,candidate_sample=excluded.candidate_sample').run(item.id,stable,item.status,candidateSince,candidateSample);
   }
   async function collect(){
-    if(stopped||!source)return;
+    if(stopped||!sourceEnabled())return;
     const previousChannelId=db.prepare("SELECT value FROM app_meta WHERE key='gpu_channel_id'").get()?.value;
     const previousMessageId=previousChannelId?db.prepare('SELECT coalesce(max(id),0) n FROM messages WHERE channel_id=?').get(previousChannelId).n:0;
     const channelId=ensureChannel();
@@ -122,7 +123,7 @@ export function createGpuMonitor({db,source=null,emit=()=>{},history=null,demo=f
   }
   function poll(){if(stopped)return Promise.resolve();if(pending)return pending;pending=collect().finally(()=>{pending=null;});return pending;}
   function view(){
-    const time=now(),connection=!source?'disabled':!snapshot.lastSuccessAt?snapshot.connection:snapshot.connection==='error'||time-snapshot.lastSuccessAt>45000?'error':snapshot.connection;
+    const time=now(),connection=!sourceEnabled()?'disabled':!snapshot.lastSuccessAt?snapshot.connection:snapshot.connection==='error'||time-snapshot.lastSuccessAt>45000?'error':snapshot.connection;
     const items=snapshot.items.map(item=>({...item,status:connection!=='ok'?'unknown':item.reportedAt&&time-item.reportedAt>STALE_MS?'offline':item.status}));
     return {configured:Boolean(source),demo,connection,checkedAt:snapshot.checkedAt,lastSuccessAt:snapshot.lastSuccessAt,channelId:db.prepare("SELECT value FROM app_meta WHERE key='gpu_channel_id'").get()?.value||null,items,summary:{hosts:new Set(items.map(i=>i.host)).size,total:items.length,...Object.fromEntries(Object.keys(labels).map(s=>[s,items.filter(i=>i.status===s).length]))}};
   }

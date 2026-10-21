@@ -1,20 +1,22 @@
-import {useEffect,useState} from 'react';
+import {lazy,Suspense,useEffect,useState} from 'react';
 import {Server,RefreshCw,Bell} from 'lucide-react';
 import {api,post,type User} from './api';
 import './server-resources.css';
 import {ResourceCatalogEditor} from './ResourceCatalogEditor';
+const SshConnections=lazy(()=>import('./SshConnections').then(module=>({default:module.SshConnections})));
 type Metric=number|null;
 type Sample={reportedAt:number;hostname:string;os:string;kernel:string;architecture:string;model:string|null;scope:'host'|'container';uptimeSeconds:Metric;cpu:{model:string|null;logicalCores:Metric;physicalCores:Metric;sockets:Metric;usagePercent:Metric;load1:Metric;allowedCores:Metric;quotaCores:Metric};memory:{totalBytes:Metric;availableBytes:Metric;usedBytes:Metric;swapTotalBytes:Metric;swapFreeBytes:Metric;limitBytes:Metric;cgroupUsedBytes:Metric;cgroupAvailableBytes:Metric};disks:{mount:string;filesystem:string;totalBytes:Metric;availableBytes:Metric;usedBytes:Metric}[]};
-type Inventory={canManageResources:boolean;checkedAt:number|null;isServerManager:boolean;alertChannelId:string|null;analysisConfigured:boolean;items:{host:string;label:string;declared:{cpuModel:string;cpuCores:Metric;memoryGiB:Metric;storageGiB:Metric;ownerName:string|null}|null;hosting:string;note:string;status:string;reportedAt:number|null;inventoryConnected:boolean;sample:Sample|null;gpus:{index:number;name:string;label?:string;registered?:boolean;declaredMemoryGiB?:Metric;memoryTotalMiB:Metric;memoryFreeMiB:Metric;utilization:Metric}[]}[];incidents:{id:number;host:string;kind:string;opened_at:number;resolved_at:number|null;analysis_status:string;analysis:{summary:string;checks:string[]}|null}[]};
+type Inventory={sshEnabled?:boolean;canManageResources:boolean;checkedAt:number|null;isServerManager:boolean;alertChannelId:string|null;analysisConfigured:boolean;items:{host:string;label:string;declared:{cpuModel:string;cpuCores:Metric;memoryGiB:Metric;storageGiB:Metric;ownerName:string|null}|null;hosting:string;note:string;status:string;reportedAt:number|null;inventoryConnected:boolean;sample:Sample|null;gpus:{index:number;name:string;label?:string;registered?:boolean;declaredMemoryGiB?:Metric;memoryTotalMiB:Metric;memoryFreeMiB:Metric;utilization:Metric}[]}[];incidents:{id:number;host:string;kind:string;opened_at:number;resolved_at:number|null;analysis_status:string;analysis:{summary:string;checks:string[]}|null}[]};
 const bytes=(v:Metric)=>v===null?'확인 불가':`${(v/1024**3).toFixed(1)} GiB`;
 const stamp=(v:number|null)=>v?new Date(v).toLocaleString('ko-KR'):'기록 없음';
 const percent=(v:Metric)=>v===null?'—':`${v}%`;
 export function ServerResources({me,onChannel}:{me:User;onChannel:(id:string)=>void}){
-  const [data,setData]=useState<Inventory|null>(null),[error,setError]=useState(''),[refresh,setRefresh]=useState(0),[editing,setEditing]=useState(false);
+  const [data,setData]=useState<Inventory|null>(null),[error,setError]=useState(''),[refresh,setRefresh]=useState(0),[editing,setEditing]=useState(false),[sshOpen,setSshOpen]=useState(false);
   useEffect(()=>{let live=true,controller:AbortController|null=null;async function load(){if(document.visibilityState==='hidden')return;controller?.abort();controller=new AbortController();try{const d=await api<Inventory>('/resources/servers',{signal:controller.signal});if(live){setData(d);setError('');}}catch(e){if(live&&(e as Error).name!=='AbortError')setError('서버 현황을 불러오지 못했습니다. 현재 가용량을 확인할 수 없습니다.');}}void load();const timer=setInterval(()=>void load(),15000);document.addEventListener('visibilitychange',load);return()=>{live=false;controller?.abort();clearInterval(timer);document.removeEventListener('visibilitychange',load);};},[refresh]);
   return <section aria-label="서버 사양과 가용량"><div className="server-toolbar"><div><h2><Server size={20}/> 서버 사양·가용량</h2><p className="muted small-text">호스트의 관측값입니다. 남은 용량은 사용 예약이나 할당 보장이 아닙니다.</p></div><button className="secondary" onClick={()=>setRefresh(v=>v+1)}><RefreshCw size={16}/>새로고침</button></div>
-    {data?.canManageResources&&<div className="resource-controls"><button className="primary" aria-expanded={editing} onClick={()=>setEditing(v=>!v)}>{editing?'자원 등록 관리 닫기':'자원 등록·관리'}</button></div>}
+    {data?.canManageResources&&<div className="resource-controls"><button className="primary" aria-expanded={editing} onClick={()=>setEditing(v=>!v)}>{editing?'자원 등록 관리 닫기':'자원 등록·관리'}</button>{data.sshEnabled&&<button className="secondary" aria-expanded={sshOpen} onClick={()=>setSshOpen(v=>!v)}>{sshOpen?'SSH 연결 닫기':'SSH 연결·자동 설정'}</button>}</div>}
     {editing&&data?.canManageResources&&<ResourceCatalogEditor onSaved={()=>setRefresh(v=>v+1)}/>}
+    {sshOpen&&data?.canManageResources&&<Suspense fallback={<p>SSH 연결 화면을 불러오는 중…</p>}><SshConnections onConnected={()=>setRefresh(v=>v+1)}/></Suspense>}
     {error&&<p className="gpu-warning" role="alert">{error}</p>}
     {!data&&!error&&<p>서버 정보를 불러오는 중…</p>}
     <div className="server-grid">{data?.items.map(host=>{const s=host.sample,fresh=!error&&host.status==='online';return <article className="server-card" key={host.host}><div className="gpu-card-top"><strong>{host.label||host.host}</strong><span className={`gpu-status ${fresh?'idle':'unknown'}`}>{fresh?'보고 중':host.status==='offline'?'보고 중단':'확인 대기'}</span></div>

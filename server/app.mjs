@@ -9,6 +9,7 @@ import { openDatabase, transaction, createUser, createChannel, publicUser, seedD
 import { token, hashToken, hashPassword, verifyPassword, getSession, startSession, rateLimiter } from './auth.mjs';
 import {createDemoGate} from './demo-gate.mjs';
 import {createResourceCatalog,mountResourceCatalog} from './resource-catalog.mjs';
+import {createSshConnections} from './ssh-connections.mjs';
 import {createServerMonitor} from './servers.mjs';
 import {createGpuMonitor} from './gpu.mjs';
 import {createResources,mountResources} from './resources.mjs';
@@ -43,7 +44,7 @@ const integer=value=>{
 };
 const emojiSet=new Set(['👍','❤️','🎉','👀','🌱','✅']);
 
-export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',setupToken=token(),distDir=resolve('dist'),demoGateHash,gpuSource=null,gpuAutoStart=true,resourceSource=null,desktopReleaseDir=null,domainProbe,serverSource=null,serverAnalyze=null}={}) {
+export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',setupToken=token(),distDir=resolve('dist'),demoGateHash,gpuSource=null,gpuAutoStart=true,resourceSource=null,desktopReleaseDir=null,domainProbe,serverSource=null,serverAnalyze=null,sshOptions=null}={}) {
   if (!dataDir) throw new Error('dataDir is required');
   if (!['local','demo'].includes(mode)) throw new Error('LAB_AUTH_MODE must be local or demo');
   const demoGate=mode==='demo'&&demoGateHash?createDemoGate(demoGateHash):null;
@@ -114,6 +115,8 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   const page=(rows,viewerId)=>({messages:rows.slice(0,80).map(m=>decorate(m,viewerId)).reverse(),hasMore:rows.length>80});
 
   const gpuHistory=mode==='demo'?null:createGpuHistory({db});
+  const ssh=sshOptions?createSshConnections({...sshOptions,db,dataDir}):null;
+  if(ssh)({serverSource,gpuSource}=ssh.mergeSources(serverSource,gpuSource));
   const gpu=createGpuMonitor({db,source:gpuSource,emit,history:gpuHistory,demo:mode==='demo',autoStart:gpuAutoStart});
   const catalog=createResourceCatalog({db,gpu,source:serverSource});
   const servers=createServerMonitor({db,gpu,catalog,source:serverSource,analyze:serverAnalyze,emit,audit,autoStart:gpuAutoStart&&(!!serverSource||!!gpuSource)});
@@ -180,7 +183,8 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
     if(req.get('If-None-Match')===etag)return res.status(304).end();
     res.type('json').send(body);
   });
-  app.get('/api/resources/servers',(req,res)=>res.json(servers.view(req.user.id)));
+  app.get('/api/resources/servers',(req,res)=>res.json({...servers.view(req.user.id),sshEnabled:!!ssh}));
+  ssh?.mount(app);
   app.get('/api/admin/server-managers',(req,res)=>{admin(req);res.json(servers.roleView());});
   app.post('/api/admin/server-managers',(req,res)=>{admin(req);res.json(servers.setManager(req.user.id,req.body.userId,req.body.enabled));});
   mountResourceCatalog(app,catalog);
@@ -445,5 +449,5 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   });
   const closeStreams=()=>{for(const c of clients)c.res.end();};
   let closed=false;
-  return {app,db,setupToken,gpu,resources,servers,catalog,closeStreams,close:()=>{if(closed)return;closed=true;metrics.close();void servers.stop();resources.stop();void gpu.stop();closeStreams();db.close();}};
+  return {app,db,setupToken,gpu,resources,servers,catalog,ssh,closeStreams,close:()=>{if(closed)return;closed=true;ssh?.stop();metrics.close();void servers.stop();resources.stop();void gpu.stop();closeStreams();db.close();}};
 }

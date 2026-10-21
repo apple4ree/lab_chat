@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {createServerSource} from './server-source.mjs';
 import {createIncidentAnalyzer} from './incident-ai.mjs';
+import {createSshPlanner} from './ssh-planner.mjs';
 import { createApp } from './app.mjs';
 import {gpuHttpSource,demoGpuSource} from './gpu.mjs';
 import {createResourceSource} from './resource-source.mjs';
@@ -18,7 +19,8 @@ const legacyAi=createResourceSource({baseUrl:process.env.LAB_AI_USAGE_URL||proce
 const aiSource=process.env.LAB_ERP_SESSION_FILE?createErpAiSource({sessionFile:resolve(root,process.env.LAB_ERP_SESSION_FILE),usageSource:legacyAi}):legacyAi;
 const serverSource=mode==='local'?createServerSource(process.env.LAB_SERVER_TARGETS_FILE):null;
 const serverAnalyze=mode==='local'&&process.env.LAB_INCIDENT_CODEX_ENABLED==='1'?createIncidentAnalyzer({directory:resolve(dataDir,'incident-ai'),authFile:process.env.LAB_INCIDENT_CODEX_AUTH_FILE,codexPath:process.env.LAB_INCIDENT_CODEX_PATH,model:process.env.LAB_INCIDENT_CODEX_MODEL}):null;
-const service=createApp({dataDir,origin,mode,serverSource,serverAnalyze,setupToken:process.env.LAB_SETUP_TOKEN,distDir:resolve(root,'dist'),demoGateHash:process.env.LAB_DEMO_GATE_HASH,gpuSource:mode==='demo'?demoGpuSource:process.env.LAB_GPU_URL?gpuHttpSource(process.env.LAB_GPU_URL):null,resourceSource:mode==='demo'?null:aiSource,desktopReleaseDir:resolve(root,'.data/desktop-releases')});
+const sshPlanner=mode==='local'?createSshPlanner({directory:resolve(dataDir,'ssh-plan-ai'),authFile:process.env.LAB_SSH_CODEX_AUTH_FILE||process.env.LAB_INCIDENT_CODEX_AUTH_FILE,codexPath:process.env.LAB_SSH_CODEX_PATH||process.env.LAB_INCIDENT_CODEX_PATH,model:process.env.LAB_SSH_CODEX_MODEL||process.env.LAB_INCIDENT_CODEX_MODEL}):null;
+const service=createApp({dataDir,origin,mode,serverSource,serverAnalyze,sshOptions:mode==='local'?{planner:sshPlanner}:null,setupToken:process.env.LAB_SETUP_TOKEN,distDir:resolve(root,'dist'),demoGateHash:process.env.LAB_DEMO_GATE_HASH,gpuSource:mode==='demo'?demoGpuSource:process.env.LAB_GPU_URL?gpuHttpSource(process.env.LAB_GPU_URL):null,resourceSource:mode==='demo'?null:aiSource,desktopReleaseDir:resolve(root,'.data/desktop-releases')});
 const server=service.app.listen(port,host,()=>{
   console.log(`Lab Chat: ${origin} (${mode})`);
   console.log(`Data: ${dataDir}`);
@@ -27,6 +29,7 @@ const server=service.app.listen(port,host,()=>{
 let stopping=false;
 function stop(){
   if(stopping)return;stopping=true;
+  service.ssh?.stop();
   void service.servers.stop();
   void service.gpu.stop();
   service.resources.stop();
