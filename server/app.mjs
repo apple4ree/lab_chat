@@ -1,6 +1,7 @@
 import express from 'express';
 import helmet from 'helmet';
 import multer from 'multer';
+import {open} from 'node:fs/promises';
 import { mkdirSync, unlinkSync, existsSync, createReadStream } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
 import { randomUUID, timingSafeEqual, createHash } from 'node:crypto';
@@ -31,6 +32,8 @@ const passwordValue=value=>{
   if (typeof value!=='string' || !value.trim() || value.length<10 || value.length>256) fail(400,'비밀번호는 10~256자로 입력해 주세요.');
   return value;
 };
+// This is a preview candidate; PDF bytes are verified at the serving boundary.
+const previewKind=name=>/\.pdf$/i.test(name)?'pdf':/\.html?$/i.test(name)?'html':null;
 const integer=value=>{
   const n=Number(value);
   if (!Number.isSafeInteger(n)||n<1) fail(400,'올바른 메시지 번호가 필요합니다.');
@@ -96,7 +99,7 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   }
   function decorate(message,viewerId) {
     const user=db.prepare('SELECT id,name,handle,role FROM users WHERE id=?').get(message.user_id);
-    return {...message,revision:sync.head(),user,files:message.deleted?[]:db.prepare('SELECT id,original_name AS name,size FROM files WHERE message_id=?').all(message.id),
+    return {...message,revision:sync.head(),user,files:message.deleted?[]:db.prepare('SELECT id,original_name AS name,size FROM files WHERE message_id=?').all(message.id).map(file=>({...file,previewKind:previewKind(file.name)})),
       reactions:message.deleted?[]:db.prepare('SELECT emoji,count(*) AS count,max(user_id=?) AS mine FROM reactions WHERE message_id=? GROUP BY emoji ORDER BY emoji').all(viewerId,message.id),
       reply_count:db.prepare('SELECT count(*) AS n FROM messages WHERE parent_id=?').get(message.id).n};
   }
@@ -332,10 +335,32 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
       if(!replayed)emit(message.channel_id);res.status(201).json(decorate(message,req.user.id));
     } catch(error) { if(temporary&&req.file&&existsSync(req.file.path))unlinkSync(req.file.path);next(error); }
   });
-  app.get('/api/files/:id',(req,res)=>{
+  function fileFor(req){
     const file=db.prepare('SELECT f.*,m.channel_id,m.deleted FROM files f JOIN messages m ON m.id=f.message_id WHERE f.id=?').get(req.params.id);
     if(!file||file.deleted||!membership(req.user.id,file.channel_id)) fail(404,'파일을 찾을 수 없습니다.');
+    return file;
+  }
+  app.get('/api/files/:id',(req,res)=>{
+    const file=fileFor(req);
     res.set('Content-Type','application/octet-stream');res.download(file.storage_name,file.original_name,{root:resolve(uploads),dotfiles:'deny'});
+  });
+  app.get('/api/files/:id/preview',async(req,res)=>{
+    const file=fileFor(req),kind=previewKind(file.original_name);
+    if(!kind)fail(415,'HTML과 PDF 파일만 미리볼 수 있습니다.');
+    if(kind==='pdf'){
+      const handle=await open(join(uploads,file.storage_name),'r');
+      try{const header=Buffer.alloc(5);await handle.read(header,0,5,0);if(header.toString('ascii')!=='%PDF-')fail(415,'올바른 PDF 파일이 아닙니다. 원본을 다운로드해 확인해 주세요.');}
+      finally{await handle.close();}
+    }
+    res.set('Content-Type',kind==='html'?'text/html; charset=utf-8':'application/pdf');
+    res.set('Content-Disposition',`inline; filename*=UTF-8''${encodeURIComponent(file.original_name).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16))}`);
+    // HTML stays opaque and scriptless even when this URL is opened directly.
+    // PDFs use the browser's built-in viewer; iframe sandbox would disable it.
+    res.set('Content-Security-Policy',kind==='html'
+      ?"sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+      :"default-src 'none'; object-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'");
+    res.set('Referrer-Policy','no-referrer');
+    res.sendFile(file.storage_name,{root:resolve(uploads),dotfiles:'deny',cacheControl:false});
   });
   app.patch('/api/messages/:id',(req,res)=>{
     const m=messageFor(req,req.params.id);

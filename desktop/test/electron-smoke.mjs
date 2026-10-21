@@ -42,6 +42,22 @@ try{
   const unread=await page.evaluate(id=>fetch('/api/channels').then(r=>r.json()).then(cs=>cs.find(c=>c.id===id).unread),target.id);assert.ok(unread>0);result.checks.push('hidden-window-unread-and-badge');
   await app.evaluate(({BrowserWindow},id)=>{const w=BrowserWindow.getAllWindows()[0];w.show();w.focus();w.webContents.send('dami:navigate',id);},target.id);
   await until(async()=>(await page.evaluate(id=>fetch('/api/channels').then(r=>r.json()).then(cs=>cs.find(c=>c.id===id).unread),target.id))===0,'read not acknowledged on focus');result.checks.push('notification-channel-navigation');
+  const pdf=await app.evaluate(async({BrowserWindow})=>Array.from(await BrowserWindow.getAllWindows()[0].webContents.printToPDF({})));
+  for(const [name,type,content] of [['desktop-preview.html','text/html','<h1>Desktop HTML Preview</h1><script>parent.pwned=true</script>'],['desktop-preview.pdf','application/pdf',Buffer.from(pdf)]]){
+    const form=new FormData();form.set('file',new Blob([content],{type}),name);
+    const uploaded=await fetch(`${origin}/api/channels/${target.id}/files`,{method:'POST',headers:{Cookie:cookie,'X-Lab-Request':'1'},body:form});assert.equal(uploaded.status,201);
+    await page.locator('.file-card').filter({hasText:name}).click();
+    if(type==='text/html'){
+      await page.frameLocator('.file-preview-panel iframe').getByRole('heading',{name:'Desktop HTML Preview'}).waitFor();
+      assert.equal(await page.evaluate(()=>window.pwned),undefined);result.checks.push('isolated-html-preview');
+    }else{
+      await until(async()=>{
+        for(const frame of page.frames())if(await frame.evaluate(()=>{const viewer=document.querySelector('pdf-viewer');return viewer?.loadState==='success'||viewer?.loadState_==='success';}).catch(()=>false))return true;
+        return false;
+      },'native PDF document did not finish loading');result.checks.push('native-pdf-preview');
+    }
+    await page.getByRole('button',{name:'미리보기 닫기'}).click();
+  }
   await page.locator('.sidebar').getByRole('button',{name:'연구 자원',exact:true}).click();await page.getByRole('button',{name:'예약·배정',exact:true}).click();await page.getByRole('heading',{name:'GPU 예약·배정',exact:true}).waitFor();result.checks.push('gpu-resource-ui');
   mkdirSync('.data/deploy/evidence',{recursive:true});await page.screenshot({path:'.data/deploy/evidence/desktop-linux.png'});
   await app.close();app=null;page=await launch();await page.getByLabel('메시지 입력',{exact:true}).waitFor();result.checks.push('login-survives-restart');

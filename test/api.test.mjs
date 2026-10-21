@@ -92,6 +92,34 @@ test('file uploads preserve names, require channel permission, and download as a
   assert.equal((await request(`/channels/${privateId}/files`,{method:'POST',cookie:alice.cookie,body:invalid})).status,404);
   assert.equal(readdirSync(join(directory,'uploads')).length,before);
 });
+test('preview enforces file membership, isolation, PDF bytes/ranges, and deletion',async()=>{
+  const uploadFile=async(name,content)=>{
+    const form=new FormData();form.set('file',new Blob([content]),name);
+    const result=await request(`/channels/${privateId}/files`,{method:'POST',cookie:alice.cookie,body:form});assert.equal(result.status,201);return result.data;
+  };
+  const html=await uploadFile('보고서.HTML','<h1>연구 결과</h1><script>parent.pwned=true</script>');
+  const file=html.files[0];assert.equal(file.previewKind,'html');
+  const url=base+`/api/files/${file.id}/preview`;
+  assert.equal((await fetch(url)).status,401);
+  assert.equal((await fetch(url,{headers:{Cookie:charlie.cookie}})).status,404);
+  const response=await fetch(url,{headers:{Cookie:bob.cookie}});
+  assert.equal(response.status,200);assert.match(response.headers.get('content-type'),/^text\/html/);
+  assert.match(response.headers.get('content-disposition'),/^inline;/);
+  assert.match(response.headers.get('content-security-policy'),/^sandbox; default-src 'none'/);
+  assert.equal(response.headers.get('cache-control'),'no-store');
+  assert.match(await response.text(),/연구 결과/);
+  assert.equal((await fetch(url,{method:'HEAD',headers:{Cookie:bob.cookie}})).status,200);
+  const pdf=await uploadFile('report.pdf','%PDF-1.4\nPDF test bytes');assert.equal(pdf.files[0].previewKind,'pdf');
+  const range=await fetch(base+`/api/files/${pdf.files[0].id}/preview`,{headers:{Cookie:bob.cookie,Range:'bytes=0-4'}});
+  assert.equal(range.status,206);assert.equal(range.headers.get('content-type'),'application/pdf');assert.equal(await range.text(),'%PDF-');
+  for(const [name,content] of [['fake.pdf','<script>bad()</script>'],['report.svg','<svg/>'],['report.txt','text']]){
+    const uploaded=await uploadFile(name,content);
+    assert.equal((await fetch(base+`/api/files/${uploaded.files[0].id}/preview`,{headers:{Cookie:alice.cookie}})).status,415);
+    const original=await fetch(base+`/api/files/${uploaded.files[0].id}`,{headers:{Cookie:alice.cookie}});assert.equal(original.status,200);assert.match(original.headers.get('content-disposition'),/^attachment;/);
+  }
+  await request(`/messages/${html.id}`,{method:'DELETE',cookie:alice.cookie});
+  assert.equal((await fetch(url,{headers:{Cookie:alice.cookie}})).status,404);
+});
 test('edits, reaction toggles and pins enforce ownership and membership',async()=>{
   assert.equal((await request(`/messages/${secretId}`,{method:'PATCH',cookie:bob.cookie,body:{body:'unauthorized'}})).status,403);
   assert.equal((await request(`/messages/${secretId}/pin`,{method:'POST',cookie:charlie.cookie,body:{}})).status,404);
@@ -134,7 +162,7 @@ test('a second connection sees durable messages, memberships and attachments',()
   const reopened=openDatabase(directory);
   assert.equal(reopened.prepare('SELECT count(*) AS n FROM users').get().n,3);
   assert.equal(reopened.prepare('SELECT count(*) AS n FROM messages WHERE channel_id=?').get(publicId).n,84);
-  assert.equal(reopened.prepare('SELECT count(*) AS n FROM files').get().n,1);reopened.close();
+  assert.deepEqual(reopened.prepare('SELECT * FROM files ORDER BY id').all(),service.db.prepare('SELECT * FROM files ORDER BY id').all());reopened.close();
 });
 test('password change revokes older sessions; logout and invitation expiry are enforced',async()=>{
   const passwordChange=await request('/auth/password',{method:'POST',cookie:bob.cookie,body:{currentPassword:password,password:'new-test-password-123'}});assert.equal(passwordChange.status,204);
@@ -151,7 +179,7 @@ test('password change revokes older sessions; logout and invitation expiry are e
 });
 test('backup snapshot reopens with all accounts, messages and byte-identical attachments',async()=>{
   const destination=join(directory,'snapshot');
-  const summary=await createBackup(directory,destination);assert.equal(summary.users,3);assert.equal(summary.files,1);
+  const summary=await createBackup(directory,destination);assert.equal(summary.users,3);assert.equal(summary.files,service.db.prepare('SELECT count(*) AS n FROM files').get().n);
   const manifest=JSON.parse(readFileSync(join(destination,'backup-manifest.json'),'utf8'));
   const restored=openDatabase(destination);assert.equal(restored.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
   assert.equal(restored.prepare('SELECT count(*) AS n FROM messages').get().n,manifest.messages);

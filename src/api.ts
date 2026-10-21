@@ -33,6 +33,7 @@ export async function api<T>(path:string,options:ApiOptions={}):Promise<T>{
 export const post=<T,>(path:string,body:unknown={},options:ApiOptions={})=>api<T>(path,{...options,method:'POST',body:JSON.stringify(body)});
 export type User={id:string;name:string;handle:string;role:string;email?:string};
 export type Channel={id:string;name:string;topic:string;kind:'public'|'private'|'dm';created_by:string;members:User[];unread:number;mentions:number;last_read_id:number;latest_message_id?:number};
-export type Message={id:number;revision?:number;channel_id:string;user_id:string;parent_id:number|null;body:string;deleted:number;pinned:number;created_at:string;edited_at:string|null;user:User;files:{id:string;name:string;size:number}[];reactions:{emoji:string;count:number;mine:number}[];reply_count:number;channel_name?:string};
+export type Attachment={id:string;name:string;size:number;previewKind?:'html'|'pdf'|null};
+export type Message={id:number;revision?:number;channel_id:string;user_id:string;parent_id:number|null;body:string;deleted:number;pinned:number;created_at:string;edited_at:string|null;user:User;files:Attachment[];reactions:{emoji:string;count:number;mine:number}[];reply_count:number;channel_name?:string};
 export type Page={messages:Message[];hasMore:boolean};
 export type AuthConfig={mode:'local'|'demo';needsSetup:boolean;demoUsers:User[]};

@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState,type ReactNode} from 'react';
-import {X,Paperclip,Send,Smile,MessageSquare,Pin,Pencil,Trash2,FileText,AtSign,LoaderCircle,Check} from 'lucide-react';
-import {api,post,type User,type Message} from './api';
+import {X,Paperclip,Send,Smile,MessageSquare,Pin,Pencil,Trash2,FileText,Download,AtSign,LoaderCircle,Check} from 'lucide-react';
+import {api,post,type User,type Message,type Attachment} from './api';
 
 export function Avatar({user,small=false}:{user:User;small?:boolean}){
   const color=user.name.split('').reduce((a,c)=>a+c.charCodeAt(0),0)%5;
@@ -14,7 +14,7 @@ export function Dialog({title,children,onClose}:{title:string;children:ReactNode
 export function Body({text}:{text:string}){
   return <div className="message-body">{text.split(/(https?:\/\/[^\s<>]+|@[a-zA-Z0-9_-]+)/g).map((part,i)=>/^https?:\/\//.test(part)?<a key={i} href={part} target="_blank" rel="noopener noreferrer">{part}</a>:part.startsWith('@')?<span className="mention" key={i}>{part}</span>:part)}</div>;
 }
-export function MessageRow({message:m,me,onThread,onChange,onError,thread=false}:{message:Message;me:User;onThread:(m:Message)=>void;onChange:()=>void;onError:(e:unknown)=>void;thread?:boolean}){
+export function MessageRow({message:m,me,onThread,onChange,onError,onPreview,thread=false}:{message:Message;me:User;onThread:(m:Message)=>void;onChange:()=>void;onError:(e:unknown)=>void;thread?:boolean;onPreview?:(file:Attachment,message:Message)=>void}){
   const [editing,setEditing]=useState(false),[draft,setDraft]=useState(m.body),[picker,setPicker]=useState(false),[confirmDelete,setConfirmDelete]=useState(false),[busy,setBusy]=useState(false);
   async function action(fn:()=>Promise<unknown>){setBusy(true);try{await fn();onChange();}catch(e){onError(e);}finally{setBusy(false);}}
   return <article className={`message ${m.pinned?'is-pinned':''}`} id={`message-${m.id}`} data-message-id={m.id}>
@@ -22,7 +22,7 @@ export function MessageRow({message:m,me,onThread,onChange,onError,thread=false}
       {m.pinned===1&&<div className="pin-label"><Pin size={11}/> 고정된 메시지</div>}
       <div className="message-meta"><strong>{m.user.name}</strong>{m.user.role==='bot'&&<span className="pill">자동 알림</span>}<time dateTime={m.created_at} title={new Date(m.created_at).toLocaleString('ko-KR')}>{new Date(m.created_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false})}</time>{m.edited_at&&<span className="muted small-text">수정됨</span>}</div>
       {m.deleted?<p className="deleted">삭제된 메시지입니다.</p>:editing?<form className="edit-form" onSubmit={e=>{e.preventDefault();void action(async()=>{await api(`/messages/${m.id}`,{method:'PATCH',body:JSON.stringify({body:draft})});setEditing(false);});}}><textarea aria-label="메시지 수정" value={draft} onChange={e=>setDraft(e.target.value)} maxLength={16000}/><div className="form-actions"><button type="button" className="secondary" onClick={()=>setEditing(false)}>취소</button><button className="primary" disabled={busy}>저장</button></div></form>:<Body text={m.body}/>}
-      {m.files.map(f=><a className="file-card" href={`/api/files/${f.id}`} key={f.id} download><span className="file-icon"><FileText size={22}/></span><span><strong>{f.name}</strong><small>{f.size<1048576?`${Math.ceil(f.size/1024)} KB`:`${(f.size/1048576).toFixed(1)} MB`} · 다운로드</small></span></a>)}
+      {m.files.map(f=><span className="file-attachment" key={f.id}><a className="file-card" href={`/api/files/${f.id}`} download onClick={e=>{if(onPreview&&f.previewKind&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&!e.altKey){e.preventDefault();onPreview(f,m);}}}><span className="file-icon"><FileText size={22}/></span><span><strong>{f.name}</strong><small>{f.size<1048576?`${Math.ceil(f.size/1024)} KB`:`${(f.size/1048576).toFixed(1)} MB`} · {onPreview&&f.previewKind?'미리보기':'다운로드'}</small></span></a>{onPreview&&f.previewKind&&<a className="icon-button file-download" href={`/api/files/${f.id}`} download aria-label={`${f.name} 다운로드`} title="원본 다운로드"><Download size={16}/></a>}</span>)}
       {!!m.reactions.length&&<div className="reactions">{m.reactions.map(r=><button disabled={busy} className={r.mine?'mine':''} key={r.emoji} onClick={()=>void action(()=>post(`/messages/${m.id}/reactions`,{emoji:r.emoji}))} aria-label={`${r.emoji} 반응 ${r.count}개`} aria-pressed={!!r.mine}>{r.emoji}<span>{r.count}</span></button>)}</div>}
       {!thread&&m.reply_count>0&&<button className="thread-link" onClick={()=>onThread(m)}><MessageSquare size={14}/><b>답글 {m.reply_count}개</b><span>스레드 보기</span></button>}
     </div>

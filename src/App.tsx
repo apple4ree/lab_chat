@@ -1,12 +1,13 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {FlaskConical,Search,Plus,Hash,Lock,ChevronDown,MessageSquare,Home,Bell,Settings,LogOut,Users,Pin,X,Menu,ArrowRight,Check,Copy,ArrowLeft,WifiOff,LoaderCircle,ShieldCheck,FileText,Cpu} from 'lucide-react';
-import {api,post,ApiError,type User,type AuthConfig,type Channel,type Message,type Page} from './api';
+import {api,post,ApiError,type User,type AuthConfig,type Channel,type Message,type Page,type Attachment} from './api';
 import {Auth} from './Auth';
 import {GpuResources} from './GpuResources';
 import {Avatar,Dialog,Composer,MessageRow,Body} from './components';
 import {canMarkRead,clearDesktopSession,useDesktop} from './desktop';
 import {DesktopDownloads} from './DesktopDownloads';
 import {DesktopUpdateNotice} from './DesktopUpdateNotice';
+import {FilePreview,type PreviewSelection} from './FilePreview';
 import {DomainSettings,DomainNotice} from './DomainSettings';
 import {useMessageArrival} from './motion';
 import {useSync,mergeMessages,type SyncBatch} from './sync';
@@ -22,12 +23,20 @@ export default function App(){
   useEffect(()=>{if(!me)clearDesktopSession();},[me]);
   if(error)return <div className="loading-page"><WifiOff/><h2>연결을 확인해 주세요</h2><p>{error}</p><button className="primary" onClick={()=>void boot()}>다시 연결</button></div>;
   if(!ready||!config)return <div className="loading-page"><FlaskConical size={36}/><p>연구실 공간을 열고 있어요…</p></div>;
-  return <><DomainNotice/>{me?<Workspace me={me} config={config} onLogout={()=>{setMe(null);void boot();}}/>:<Auth config={config} onLogin={setMe}/>}</>;
+  return <><DomainNotice/>{me?<Workspace key={me.id} me={me} config={config} onLogout={()=>{setMe(null);void boot();}}/>:<Auth config={config} onLogin={setMe}/>}</>;
 }
 
 function Workspace({me,config,onLogout}:{me:User;config:AuthConfig;onLogout:()=>void}){
   const [channels,setChannels]=useState<Channel[]>([]),[users,setUsers]=useState<User[]>([]),[selected,setSelected]=useState(''),[messages,setMessages]=useState<Message[]>([]),[hasMore,setHasMore]=useState(false),[loading,setLoading]=useState(true),[loadingOlder,setLoadingOlder]=useState(false);
   const [gpuOpen,setGpuOpen]=useState(false);
+  const previewKey=`lab-chat:file-preview:${me.id}`;
+  const [previewEnabled,setPreviewEnabled]=useState(()=>{try{return localStorage.getItem(previewKey)!=='off';}catch{return true;}});
+  const [preview,setPreview]=useState<PreviewSelection|null>(null);
+  useEffect(()=>{try{localStorage.setItem(previewKey,previewEnabled?'on':'off');}catch{/* Storage can be unavailable in private browsing. */}},[previewKey,previewEnabled]);
+  useEffect(()=>{setPreview(null);},[selected,gpuOpen,previewEnabled]);
+  function openPreview(file:Attachment,message:Message){if(previewEnabled)setPreview({file,messageId:message.id,channelId:message.channel_id});}
+  function openThread(message:Message){setPreview(null);setThread(message);}
+
   const [tick,setTick]=useState(0),[error,setError]=useState(''),[dialog,setDialog]=useState<string|null>(null),[thread,setThread]=useState<Message|null>(null),[mobileNav,setMobileNav]=useState(false);
   const list=useRef<HTMLDivElement>(null),selectedRef=useRef(selected),scrollToEnd=useRef(true),historyPages=useRef(1),readAck=useRef(new Map<string,number>()),channelsRef=useRef(channels);
   selectedRef.current=selected;channelsRef.current=channels;
@@ -47,6 +56,7 @@ function Workspace({me,config,onLogout}:{me:User;config:AuthConfig;onLogout:()=>
     catch(error){if(readAck.current.get(id)===until)readAck.current.delete(id);handleError(error);}
   },[handleError]);
   function applyBatch(batch:SyncBatch,requested:string|null){
+    setPreview(current=>current&&(batch.reset||batch.removedChannelIds.includes(current.channelId)||[...batch.messages,...batch.threadMessages].some(m=>m.id===current.messageId&&(m.deleted||!m.files.some(f=>f.id===current.file.id))))?null:current);
     if(batch.removedChannelIds.includes(selected)){setSelected('');setMessages([]);setThread(null);}
     setChannels(existing=>{
       const values=new Map((batch.reset||batch.users?[]:existing).map(c=>[c.id,c]));
@@ -93,7 +103,7 @@ function Workspace({me,config,onLogout}:{me:User;config:AuthConfig;onLogout:()=>
     }).catch(e=>{if(live&&e.name!=='AbortError'){setLoading(false);setSnapshotFailed(true);handleError(e);}});
     return()=>{live=false;controller.abort();};
   },[selected,tick,handleError,gpuOpen]);
-  function choose(id:string){setGpuOpen(false);if(id!==selected)setThread(null);setSelected(id);setMobileNav(false);setDialog(null);}
+  function choose(id:string){setPreview(null);setGpuOpen(false);if(id!==selected)setThread(null);setSelected(id);setMobileNav(false);setDialog(null);}
   async function older(){
     if(!messages[0]||loadingOlder)return;setLoadingOlder(true);
     const requested=selected,oldHeight=list.current?.scrollHeight||0,oldTop=list.current?.scrollTop||0;
@@ -120,15 +130,16 @@ function Workspace({me,config,onLogout}:{me:User;config:AuthConfig;onLogout:()=>
     </aside>
     <main className="conversation">
       {gpuOpen?<GpuResources me={me} onChannel={choose} onMenu={()=>setMobileNav(true)} onError={handleError}/>:channel?<><header className="channel-header"><button className="mobile-menu icon-button" aria-label="채널 목록 열기" onClick={()=>setMobileNav(true)}><Menu size={21}/></button><div className="channel-heading" key={channel.id}><h2>{channelIcon(channel,23)}{channelName(channel,me)}</h2><p>{channel.kind==='dm'?'우리 사이의 대화와 아이디어':channel.topic||'함께 이야기를 시작해 보세요'}</p></div><button className="member-stack" aria-label="채널 구성원" onClick={()=>setDialog('members')}><span>{channel.members.slice(0,3).map(u=><Avatar user={u} small key={u.id}/>)}</span><b>{channel.members.length}</b></button></header>
-      <div className="channel-tabs"><button className="active"><MessageSquare size={15}/> 메시지</button><button onClick={()=>setDialog('pins')}><Pin size={15}/> 고정 메시지</button><span>{channel.kind==='private'?<><Lock size={12}/> 비공개 채널</>:channel.kind==='dm'?<><Lock size={12}/> 두 사람만의 대화</>:<><Hash size={13}/> 연구실 공개 채널</>}</span></div>
+      <div className="channel-tabs"><button className="active"><MessageSquare size={15}/> 메시지</button><button onClick={()=>setDialog('pins')}><Pin size={15}/> 고정 메시지</button><button role="switch" aria-checked={previewEnabled} aria-label="첨부파일 미리보기" onClick={()=>setPreviewEnabled(v=>!v)}>미리보기 {previewEnabled?'ON':'OFF'}</button><span>{channel.kind==='private'?<><Lock size={12}/> 비공개 채널</>:channel.kind==='dm'?<><Lock size={12}/> 두 사람만의 대화</>:<><Hash size={13}/> 연구실 공개 채널</>}</span></div>
       <div className="message-list" ref={list} aria-label="채널 메시지">
         {snapshotFailed&&<button className="load-older" onClick={()=>setTick(t=>t+1)}>대화 다시 불러오기</button>}{loading?<div className="inline-loading"><LoaderCircle className="spin" size={22}/> 대화 불러오는 중</div>:<>{hasMore?<button className="load-older" disabled={loadingOlder} onClick={()=>void older()}>{loadingOlder?'불러오는 중…':'이전 메시지 불러오기'}</button>:<div className="channel-intro"><div className="intro-icon">{channelIcon(channel,30)}</div><h2>{channelName(channel,me)}<span>의 시작</span></h2><p>{channel.kind==='dm'?'생각을 나누고 함께 다음 걸음을 정해 보세요.':channel.topic||'이 채널에서 새로운 대화를 시작해 보세요.'}</p>{config.mode==='demo'&&<span className="demo-notice">지금 보이는 대화는 체험용 샘플입니다.</span>}</div>}
-        {messages.map((m,i)=><div key={m.id}>{(i===0||dateLabel(messages[i-1].created_at)!==dateLabel(m.created_at))&&<div className="date-divider"><span>{dateLabel(m.created_at)}</span></div>}<MessageRow message={m} me={me} onThread={setThread} onChange={refresh} onError={handleError}/></div>)}
+        {messages.map((m,i)=><div key={m.id}>{(i===0||dateLabel(messages[i-1].created_at)!==dateLabel(m.created_at))&&<div className="date-divider"><span>{dateLabel(m.created_at)}</span></div>}<MessageRow message={m} me={me} onThread={openThread} onPreview={previewEnabled?openPreview:undefined} onChange={refresh} onError={handleError}/></div>)}
         {!messages.length&&<div className="empty-conversation"><span>👋</span><p>첫 메시지로 공간을 채워 보세요.</p></div>}</>}
       </div><Composer key={channel.id} channelId={channel.id} label={channel.kind==='dm'?channelName(channel,me):`#${channel.name}`} members={channel.members} onError={handleError} onSent={message=>{scrollToEnd.current=true;setMessages(ms=>mergeMessages(ms,[message]));requestAnimationFrame(()=>{if(list.current)list.current.scrollTop=list.current.scrollHeight;});refresh();}}/>
       </>:<div className="loading-page"><LoaderCircle className="spin"/><p>채널을 준비하고 있어요.</p></div>}
     </main>
-    {!gpuOpen&&thread&&channel&&<ThreadPanel key={`${thread.id}:${tick}`} parent={thread} channel={channel} me={me} delta={threadDelta} onRead={markRead} onClose={()=>setThread(null)} onChange={refresh} onError={handleError}/>}
+    {!gpuOpen&&thread&&channel&&<ThreadPanel key={`${thread.id}:${tick}`} hidden={!!preview} onPreview={previewEnabled?openPreview:undefined} parent={thread} channel={channel} me={me} delta={threadDelta} onRead={markRead} onClose={()=>setThread(null)} onChange={refresh} onError={handleError}/>}
+    {!gpuOpen&&previewEnabled&&preview&&channel&&<FilePreview key={preview.file.id} file={preview.file} onClose={()=>setPreview(null)} onDisable={()=>setPreviewEnabled(false)}/>}
     </div>
     {error&&<div className="toast" role="alert"><span>{error}</span><button className="icon-button" aria-label="알림 닫기" onClick={()=>setError('')}><X size={16}/></button></div>}
     {dialog==='channel'&&<CreateChannel users={users} me={me} onClose={()=>setDialog(null)} onCreated={id=>{refresh();choose(id);}}/>}
@@ -153,7 +164,7 @@ function useFailedSnapshotRecovery(failed:boolean,retry:()=>void){
   },[failed]);
 }
 
-function ThreadPanel({parent,channel,me,delta,onRead,onClose,onChange,onError}:{parent:Message;channel:Channel;me:User;delta:Message[];onRead:(id:string,until:number)=>Promise<void>;onClose:()=>void;onChange:()=>void;onError:(e:unknown)=>void}){
+function ThreadPanel({parent,channel,me,delta,onRead,onClose,onChange,onError,onPreview,hidden}:{hidden:boolean;onPreview?:(file:Attachment,message:Message)=>void;parent:Message;channel:Channel;me:User;delta:Message[];onRead:(id:string,until:number)=>Promise<void>;onClose:()=>void;onChange:()=>void;onError:(e:unknown)=>void}){
   const [loaded,setLoaded]=useState(false),[root,setRoot]=useState(parent),[replies,setReplies]=useState<Message[]>([]),[hasMore,setHasMore]=useState(false),[busy,setBusy]=useState(false);const list=useRef<HTMLDivElement>(null);
   const [snapshotFailed,setSnapshotFailed]=useState(false),[attempt,setAttempt]=useState(0);
   useFailedSnapshotRecovery(snapshotFailed,()=>setAttempt(n=>n+1));
@@ -164,9 +175,9 @@ function ThreadPanel({parent,channel,me,delta,onRead,onClose,onChange,onError}:{
     const changed=delta.filter(m=>m.parent_id===parent.id);
     if(changed.length){const bottom=!list.current||list.current.scrollHeight-list.current.scrollTop-list.current.clientHeight<120;setReplies(old=>mergeMessages(old,changed));if(bottom)requestAnimationFrame(()=>{if(list.current)list.current.scrollTop=list.current.scrollHeight;});}
   },[delta,parent.id]);
-  useEffect(()=>{const read=()=>void onRead(parent.channel_id,replies.at(-1)?.id??0);read();window.addEventListener('focus',read);document.addEventListener('visibilitychange',read);return()=>{window.removeEventListener('focus',read);document.removeEventListener('visibilitychange',read);};},[parent.channel_id,replies,onRead]);
+  useEffect(()=>{if(hidden)return;const read=()=>void onRead(parent.channel_id,replies.at(-1)?.id??0);read();window.addEventListener('focus',read);document.addEventListener('visibilitychange',read);return()=>{window.removeEventListener('focus',read);document.removeEventListener('visibilitychange',read);};},[parent.channel_id,replies,onRead,hidden]);
   async function older(){setBusy(true);try{const page=await api<Page>(`/messages/${parent.id}/replies?before=${replies[0].id}`);setReplies(r=>mergeMessages(r,page.messages));setHasMore(page.hasMore);}catch(e){onError(e);}finally{setBusy(false);}}
-  return <aside className="thread-panel" aria-label="스레드"><header><div><h2>스레드</h2><span>{channelName(channel,me)}</span></div><button className="icon-button" aria-label="스레드 닫기" onClick={onClose}><X size={20}/></button></header><div className="thread-list" ref={list}>{snapshotFailed&&<button className="load-older" onClick={()=>setAttempt(n=>n+1)}>답글 다시 불러오기</button>}<MessageRow message={root} me={me} onThread={()=>{}} onChange={onChange} onError={onError} thread/><div className="reply-divider">답글 {root.reply_count}개</div>{hasMore&&<button className="load-older" disabled={busy} onClick={()=>void older()}>이전 답글 불러오기</button>}{replies.map(m=><MessageRow key={m.id} message={m} me={me} onThread={()=>{}} onChange={onChange} onError={onError} thread/>)}</div><Composer channelId={parent.channel_id} parentId={parent.id} label="스레드" members={channel.members} onError={onError} onSent={message=>{setReplies(r=>mergeMessages(r,[message]));onChange();}}/></aside>;
+  return <aside className="thread-panel" style={hidden?{display:'none'}:undefined} aria-label="스레드"><header><div><h2>스레드</h2><span>{channelName(channel,me)}</span></div><button className="icon-button" aria-label="스레드 닫기" onClick={onClose}><X size={20}/></button></header><div className="thread-list" ref={list}>{snapshotFailed&&<button className="load-older" onClick={()=>setAttempt(n=>n+1)}>답글 다시 불러오기</button>}<MessageRow message={root} me={me} onThread={()=>{}} onChange={onChange} onError={onError} onPreview={onPreview} thread/><div className="reply-divider">답글 {root.reply_count}개</div>{hasMore&&<button className="load-older" disabled={busy} onClick={()=>void older()}>이전 답글 불러오기</button>}{replies.map(m=><MessageRow key={m.id} message={m} me={me} onThread={()=>{}} onChange={onChange} onError={onError} onPreview={onPreview} thread/>)}</div><Composer channelId={parent.channel_id} parentId={parent.id} label="스레드" members={channel.members} onError={onError} onSent={message=>{setReplies(r=>mergeMessages(r,[message]));onChange();}}/></aside>;
 }
 
 function CreateChannel({users,me,onClose,onCreated}:{users:User[];me:User;onClose:()=>void;onCreated:(id:string)=>void}){
