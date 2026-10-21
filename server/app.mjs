@@ -10,6 +10,7 @@ import {createDemoGate} from './demo-gate.mjs';
 import {createGpuMonitor} from './gpu.mjs';
 import {createResources,mountResources} from './resources.mjs';
 import {createResourceSource} from './resource-source.mjs';
+import {createGpuHistory,localGpuResourceSource} from './gpu-history.mjs';
 import {mountDesktopReleases} from './desktop-releases.mjs';
 import {createSync,streamWriter} from './sync.mjs';
 import {createMetrics} from './metrics.mjs';
@@ -107,8 +108,10 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   };
   const page=(rows,viewerId)=>({messages:rows.slice(0,80).map(m=>decorate(m,viewerId)).reverse(),hasMore:rows.length>80});
 
-  const gpu=createGpuMonitor({db,source:gpuSource,emit,demo:mode==='demo',autoStart:gpuAutoStart});
-  const resources=createResources({db,gpu,emit,source:mode==='demo'?createResourceSource({demo:true}):resourceSource||createResourceSource(),autoStart:gpuAutoStart});
+  const gpuHistory=mode==='demo'?null:createGpuHistory({db});
+  const gpu=createGpuMonitor({db,source:gpuSource,emit,history:gpuHistory,demo:mode==='demo',autoStart:gpuAutoStart});
+  const sources=mode==='demo'?createResourceSource({demo:true}):localGpuResourceSource(gpuHistory,resourceSource||createResourceSource());
+  const resources=createResources({db,gpu,emit,source:sources,autoStart:gpuAutoStart});
 
   app.get('/api/health',(_req,res)=>res.json({ok:true,version:'0.1.0'}));
   app.get('/api/workspace/connection',(_req,res)=>res.json(domains.connection()));

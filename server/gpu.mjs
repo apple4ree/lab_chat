@@ -45,7 +45,7 @@ export const demoGpuSource=async()=>[
   {host:'샘플-오프라인',ts:Date.now()/1000-600,gpus:[{index:0,name:'RTX PRO 6000 · 샘플',util:0,mem_total:98304,mem_used:0,temp:31,procs:[]}]},
 ];
 
-export function createGpuMonitor({db,source=null,emit=()=>{},demo=false,intervalMs=15000,settleMs=60000,now=Date.now,autoStart=true}){
+export function createGpuMonitor({db,source=null,emit=()=>{},history=null,demo=false,intervalMs=15000,settleMs=60000,now=Date.now,autoStart=true}){
   let stopped=false,timer=null,controller=null,pending=null;
   const saved=db.prepare("SELECT value FROM app_meta WHERE key='gpu_snapshot'").get();
   let snapshot=saved?JSON.parse(saved.value):{items:[],lastSuccessAt:null,checkedAt:null,connection:'waiting'};
@@ -104,6 +104,7 @@ export function createGpuMonitor({db,source=null,emit=()=>{},demo=false,interval
       for(const item of snapshot.items)if(!seen.has(item.id))items.push({...item,status:'unknown'});
       if(items.length>1024)throw new Error('GPU inventory exceeds limit');
       transaction(db,()=>{
+        history?.record(items,time);
         if(snapshot.connection==='error')publish(channelId,'🔌 GPU 상태 서비스에 다시 연결됐습니다. 장비별 최신 상태를 확인해 주세요.');
         for(const item of items)transition(item,channelId,time);
         snapshot={items,lastSuccessAt:time,checkedAt:time,connection:'ok'};meta('gpu_snapshot',snapshot);
@@ -111,6 +112,7 @@ export function createGpuMonitor({db,source=null,emit=()=>{},demo=false,interval
     }catch{
       if(stopped)return;
       transaction(db,()=>{
+        history?.interrupt();
         if(snapshot.connection!=='error')publish(channelId,'⚠️ GPU 상태 서비스에 연결할 수 없습니다. 마지막 관측값은 현재 가용량으로 취급하지 않습니다.');
         snapshot={...snapshot,connection:'error',checkedAt:now()};meta('gpu_snapshot',snapshot);
         // Interrupt continuity: an outage cannot count toward a confirmed idle interval.

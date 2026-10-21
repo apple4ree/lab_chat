@@ -1,7 +1,7 @@
 import {useEffect,useState,type ReactNode} from 'react';
 import {api,post,type User} from './api';
 
-type Envelope<T>={data:T;fetchedAt:number;demo:boolean};
+type Envelope<T>={data:T;fetchedAt:number;demo:boolean;source?:string;collectionStartedAt?:number|null};
 export const date=(v:number|null)=>v?new Date(v).toLocaleString('ko-KR'):'기록 없음';
 const number=(v:number|null|undefined)=>v===null||v===undefined?'—':v.toLocaleString('ko-KR',{maximumFractionDigits:2});
 export function useResource<T>(path:string|null,revision=0){
@@ -31,6 +31,7 @@ export function ResourceHistory(){
   const y=(v:number)=>230-Math.min(max,v)/max*200;
   return <div className="resource-panel">
     <div className="resource-section-title"><div><h2>GPU 사용 이력</h2><p>여러 GPU의 사용률과 메모리 추이를 비교합니다. 수집이 끊긴 구간은 선으로 연결하지 않습니다.</p></div><button className="secondary" onClick={()=>setRevision(r=>r+1)}>이력 새로고침</button></div>
+    {targets.data?.source==='lab-chat'&&<p className="gpu-footnote">채팅 서버 자체 기록 · {targets.data.collectionStartedAt?`수집 시작 ${date(targets.data.collectionStartedAt)}`:'첫 번째 유효한 GPU 보고를 기다리고 있습니다.'}<br/>1분 단위는 7일, 15분 단위는 90일 보관합니다. 이전 서비스의 과거 이력은 포함하지 않습니다.</p>}
     <div className="resource-controls"><label>이력 기간<select aria-label="이력 기간" value={period} onChange={e=>setPeriod(e.target.value)}><option value="hour">최근 1시간</option><option value="day">최근 24시간</option><option value="week">최근 7일</option><option value="month">최근 30일</option></select></label><label>측정값<select aria-label="측정값" value={metric} onChange={e=>setMetric(e.target.value as typeof metric)}><option value="utilization">연산 사용률 (%)</option><option value="memoryGiB">메모리 (GiB)</option></select></label><button className="secondary" onClick={()=>setSelected([])}>선택 해제</button></div>
     <State error={targets.error} loading={!targets.data}><fieldset className="resource-targets"><legend>비교할 GPU · 최대 6개</legend>{targets.data?.data.map(t=>{const key=JSON.stringify(t);return <label key={key}><input type="checkbox" checked={selected.includes(key)} disabled={!selected.includes(key)&&selected.length>=6} onChange={e=>setSelected(a=>e.target.checked?[...a,key]:a.filter(k=>k!==key))}/>{t.host} · GPU {t.index}</label>;})}{targets.data?.data.length===0&&<p>수집된 이력이 없습니다.</p>}</fieldset></State>
     <State error={error} loading={loading}>{!selected.length?<p className="empty-state">비교할 GPU를 선택해 주세요.</p>:<>
@@ -47,7 +48,7 @@ export function ResourceHistory(){
       {series.length>0&&series.every(s=>s.result.data.length===0)&&<p>선택한 기간에 수집된 데이터가 없습니다. 사용량 0을 의미하지 않습니다.</p>}
       <details className="resource-data"><summary>수집 시각과 수치 표로 보기</summary><div className="resource-table-wrap"><table><thead><tr><th>GPU</th><th>시각</th><th>사용률</th><th>메모리</th></tr></thead><tbody>{series.flatMap(s=>s.result.data.map((p,i)=><tr key={`${s.label}-${i}`}><td>{s.label}</td><td>{date(p.at)}</td><td>{number(p.utilization)}%</td><td>{number(p.memoryGiB)} GiB</td></tr>))}</tbody></table></div></details>
     </>}</State>
-    <div className="resource-section-title"><div><h2>OS 계정별 GPU 사용 집계</h2><p>기존 수집기의 표본 기반 추정치입니다. 공용 계정은 개인별 사용량으로 구분할 수 없고, 공유 GPU는 중복 집계될 수 있습니다.</p></div><label>집계 기간<select aria-label="집계 기간" value={shareDays} onChange={e=>setShareDays(e.target.value)}>{[1,7,30,90].map(d=><option key={d} value={d}>{d}일</option>)}</select></label></div>
+    <div className="resource-section-title"><div><h2>OS 계정별 GPU 사용 집계</h2><p>{share.data?.source==='lab-chat'?'연속 관측된 GPU 프로세스의 점유 시간 추정치입니다. UTC 날짜 기준이며, 1분을 넘는 수집 공백은 제외합니다.':'체험용 표본 집계입니다.'} 공용 계정은 개인별 사용량으로 구분할 수 없고, 공유 GPU는 중복 집계될 수 있습니다.</p></div><label>집계 기간<select aria-label="집계 기간" value={shareDays} onChange={e=>setShareDays(e.target.value)}>{[1,7,30,90].map(d=><option key={d} value={d}>{d}일</option>)}</select></label></div>
     <State error={share.error} loading={!share.data}><div className="resource-table-wrap"><table><thead><tr><th>OS 계정</th><th>추정 GPU 시간</th><th>표본 비중</th></tr></thead><tbody>{share.data?.data.map((r,i)=><tr key={i}><td>{r.user}</td><td>{number(r.hours)} 시간</td><td>{number(r.percent)}%</td></tr>)}</tbody></table>{share.data?.data.length===0&&<p>집계된 표본이 없습니다.</p>}</div></State>
   </div>;
 }

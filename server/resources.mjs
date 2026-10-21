@@ -125,7 +125,8 @@ export function createResources({db,gpu,emit=()=>{},source=createResourceSource(
     const targets=(await source.get('targets')).data;
     if(!targets.some(t=>t.host===host&&t.index===index))fail(404,'이력을 조회할 수 없는 GPU입니다.');
     const to=Math.floor(now()/30000)*30,bucket=Math.max(60,Math.ceil(span/300));
-    return {...await source.get('history',{host,gpu:index,from:to-span,to,bucket}),from:(to-span)*1000,to:to*1000,bucketMs:bucket*1000};
+    const result=await source.get('history',{host,gpu:index,from:to-span,to,bucket});
+    return {...result,from:(to-span)*1000,to:to*1000,bucketMs:result.bucketMs??bucket*1000};
   }
   async function usage(query){
     const provider=query.provider||'all';if(!['all','openai','anthropic','google'].includes(provider))fail(400,'공급자를 확인해 주세요.');
