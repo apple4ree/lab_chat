@@ -145,7 +145,7 @@ export function createResources({db,gpu,emit=()=>{},source=createResourceSource(
   }
   if(autoStart){timer=setInterval(()=>{try{tick();}catch{console.error('Resource reservation timer failed');}},30000);timer.unref();}
   return {list,create,update,transition,configure,history,usage,balance,tick,
-    targets:()=>source.get('targets'),share:q=>source.get('share',{days:days(q.days)}),quotas:()=>source.get('quotas'),
+    targets:()=>source.get('targets'),share:q=>source.get('share',{days:days(q.days)}),quotas:()=>source.get('quotas'),refreshQuotas:()=>source.refreshQuotas?source.refreshQuotas():source.get('quotas'),
     events:id=>{const r=reservation(id);return db.prepare('SELECT e.*,u.name AS actor_name FROM reservation_events e LEFT JOIN users u ON u.id=e.actor_id WHERE e.reservation_id=? ORDER BY e.id DESC LIMIT 100').all(r.id);},
     stop(){stopped=true;if(timer)clearInterval(timer);source.stop();}};
 }
@@ -160,6 +160,7 @@ export function mountResources(app,service){
   app.get('/api/resources/targets',async(_req,res)=>res.json(await service.targets()));
   app.get('/api/resources/history',async(req,res)=>res.json(await service.history(req.query)));
   app.get('/api/resources/share',async(req,res)=>res.json(await service.share(req.query)));
+  app.post('/api/resources/quotas/refresh',async(_req,res)=>res.status(202).json(await service.refreshQuotas()));
   app.get('/api/resources/quotas',async(_req,res)=>res.json(await service.quotas()));
   app.get('/api/resources/usage',async(req,res)=>res.json(await service.usage(req.query)));
   app.post('/api/resources/balances',(req,res)=>res.json(service.balance(req.user,req.body)));

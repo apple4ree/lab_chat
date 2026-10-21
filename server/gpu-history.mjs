@@ -108,5 +108,5 @@ export function createGpuHistory({db,now=Date.now}){
 
 // GPU history never falls back to the legacy dashboard. AI APIs retain their own source.
 export function localGpuResourceSource(history,aiSource){
-  return {get:(kind,params)=>['targets','history','share'].includes(kind)?history.get(kind,params):aiSource.get(kind,params),stop:()=>aiSource.stop()};
+  return {get:(kind,params)=>['targets','history','share'].includes(kind)?history.get(kind,params):aiSource.get(kind,params),refreshQuotas:()=>aiSource.refreshQuotas?aiSource.refreshQuotas():aiSource.get('quotas'),stop:()=>aiSource.stop()};
 }

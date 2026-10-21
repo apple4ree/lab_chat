@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from './app.mjs';
 import {gpuHttpSource,demoGpuSource} from './gpu.mjs';
 import {createResourceSource} from './resource-source.mjs';
+import {createErpAiSource} from './erp-ai.mjs';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const host=process.env.LAB_HOST||'127.0.0.1';
 const port=Number(process.env.LAB_PORT||4310);
@@ -11,7 +12,9 @@ const origin=process.env.LAB_ORIGIN||`http://${host}:${port}`;
 if(mode==='demo'&&(!['127.0.0.1','localhost','::1'].includes(host)||process.env.NODE_ENV==='production')) throw new Error('Demo mode is restricted to local development.');
 if(!['127.0.0.1','localhost','::1'].includes(host)&&!process.env.LAB_ORIGIN) throw new Error('Set LAB_ORIGIN before listening on a network interface.');
 const dataDir=resolve(root,process.env.LAB_DATA_DIR||`.data/${mode}`);
-const service=createApp({dataDir,origin,mode,setupToken:process.env.LAB_SETUP_TOKEN,distDir:resolve(root,'dist'),demoGateHash:process.env.LAB_DEMO_GATE_HASH,gpuSource:mode==='demo'?demoGpuSource:process.env.LAB_GPU_URL?gpuHttpSource(process.env.LAB_GPU_URL):null,resourceSource:mode==='demo'?null:createResourceSource({baseUrl:process.env.LAB_GPU_URL}),desktopReleaseDir:resolve(root,'.data/desktop-releases')});
+const legacyAi=createResourceSource({baseUrl:process.env.LAB_AI_USAGE_URL||process.env.LAB_GPU_URL});
+const aiSource=process.env.LAB_ERP_SESSION_FILE?createErpAiSource({sessionFile:resolve(root,process.env.LAB_ERP_SESSION_FILE),usageSource:legacyAi}):legacyAi;
+const service=createApp({dataDir,origin,mode,setupToken:process.env.LAB_SETUP_TOKEN,distDir:resolve(root,'dist'),demoGateHash:process.env.LAB_DEMO_GATE_HASH,gpuSource:mode==='demo'?demoGpuSource:process.env.LAB_GPU_URL?gpuHttpSource(process.env.LAB_GPU_URL):null,resourceSource:mode==='demo'?null:aiSource,desktopReleaseDir:resolve(root,'.data/desktop-releases')});
 const server=service.app.listen(port,host,()=>{
   console.log(`Lab Chat: ${origin} (${mode})`);
   console.log(`Data: ${dataDir}`);

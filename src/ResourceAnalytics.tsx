@@ -53,7 +53,7 @@ export function ResourceHistory(){
   </div>;
 }
 
-type Quota={provider:string;account:string;plan:string;stale:boolean;reportedAt:number|null;fiveHour:{percent:number|null;resetsAt:number|null};sevenDay:{percent:number|null;resetsAt:number|null};servers:{host:string;lastSeen:number|null}[]};
+type Quota={id?:string;issue?:string|null;verified?:boolean;fiveHourUnlimited?:boolean;collecting?:boolean;provider:string;account:string;plan:string;stale:boolean;reportedAt:number|null;fiveHour:{percent:number|null;resetsAt:number|null};sevenDay:{percent:number|null;resetsAt:number|null};servers:{host:string;lastSeen:number|null}[]};
 type Cost={label?:string;costKRW:number|null;costUSD:number|null;tokens:number|null;requests:number|null};
 type Balance={amount:number|null;currency:string|null;updatedAt:number;source:string};
 type LocalBalance={provider:string;amount:number;currency:string;updated_at:number;updated_name:string;version:number};
@@ -61,12 +61,24 @@ type Usage={totals:Cost;byProvider:Cost[];byModel:Cost[];byPerson:Cost[];byDay:C
 function CostTable({title,rows}:{title:string;rows:Cost[]}){return <details className="resource-data" open><summary>{title}</summary><div className="resource-table-wrap"><table><thead><tr><th>항목</th><th>비용 (KRW)</th><th>토큰</th><th>요청</th></tr></thead><tbody>{rows.map((r,i)=><tr key={i}><td>{r.label}</td><td>{number(r.costKRW)}</td><td>{number(r.tokens)}</td><td>{number(r.requests)}</td></tr>)}</tbody></table>{!rows.length&&<p>집계 데이터가 없습니다.</p>}</div></details>;}
 export function ResourceAccounts({me}:{me:User}){
   const [days,setDays]=useState('30'),[provider,setProvider]=useState('all'),[revision,setRevision]=useState(0),[editing,setEditing]=useState<string|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
-  const quotas=useResource<Envelope<Quota[]>>('/resources/quotas',revision);
+  const [quotaRevision,setQuotaRevision]=useState(0),[refreshing,setRefreshing]=useState(false),[refreshMessage,setRefreshMessage]=useState(''),[refreshUntil,setRefreshUntil]=useState(0);
+  const quotas=useResource<Envelope<Quota[]>>('/resources/quotas',quotaRevision);
+  async function refreshQuotas(){
+    setRefreshing(true);setRefreshMessage('');
+    try{
+      const result=await post<{queued?:boolean}>('/resources/quotas/refresh',{}, {timeoutMs:30000});
+      setRefreshUntil(result.queued?Date.now()+90000:0);setRefreshing(!!result.queued);
+      setRefreshMessage(result.queued?'수집을 요청했습니다. 최대 90초 동안 결과를 확인합니다.':'마지막 수집 결과를 불러왔습니다.');
+      setQuotaRevision(r=>r+1);setRevision(r=>r+1);
+    }catch(e){setRefreshMessage((e as Error).message);setRefreshing(false);}
+  }
+  useEffect(()=>{if(!refreshUntil)return;const id=setInterval(()=>{if(Date.now()>=refreshUntil){setRefreshUntil(0);setRefreshing(false);setRefreshMessage('조회 대기가 끝났습니다. 마지막 수집 시각과 계정별 상태를 확인해 주세요.');}setQuotaRevision(r=>r+1);},5000);return()=>clearInterval(id);},[refreshUntil]);
+  useEffect(()=>{if(!refreshUntil||!quotas.data||quotas.data.fetchedAt<refreshUntil-90000)return;const data=quotas.data.data;if(data.length&&data.every(q=>!q.collecting)){setRefreshUntil(0);setRefreshing(false);setRefreshMessage(data.some(q=>q.issue||q.stale)?'일부 계정은 현재 한도를 확인할 수 없습니다. 계정별 상태를 확인해 주세요.':'최신 수집 결과를 불러왔습니다.');}},[quotas.data,refreshUntil]);
   const usage=useResource<Envelope<Usage>>(`/resources/usage?days=${days}&provider=${provider}`,revision);
-  useEffect(()=>{const id=setInterval(()=>{if(document.visibilityState==='visible'&&!editing)setRevision(r=>r+1);},60000);return()=>clearInterval(id);},[editing]);
+  useEffect(()=>{const id=setInterval(()=>{if(document.visibilityState==='visible'&&!editing){setRevision(r=>r+1);setQuotaRevision(r=>r+1);}},60000);return()=>clearInterval(id);},[editing]);
   return <div className="resource-panel">
-    <div className="resource-section-title"><div><h2>CLI 구독 한도</h2><p>Codex·Claude의 마지막 수집값입니다. 15분 이상 지난 값은 현재 한도로 표시하지 않습니다.</p></div><button className="secondary" onClick={()=>setRevision(r=>r+1)}>사용량 새로고침</button></div>
-    <State error={quotas.error} loading={!quotas.data}><div className="resource-quota-grid">{quotas.data?.data.map((q,i)=><article className="resource-quota" key={i}><h3>{q.provider} <span>{q.plan}</span></h3><p>{q.account}</p>{q.stale&&<p className="gpu-warning">보고 지연 · 현재 한도 확인 불가</p>}{[['5시간',q.fiveHour],['주간',q.sevenDay]].map(([label,raw])=>{const w=raw as Quota['fiveHour'];return <div key={label as string}><b>{label as string}: {number(w.percent)}%</b><div className="gpu-meter"><i style={{width:`${w.percent??0}%`}}/></div><small>리셋 예정 {date(w.resetsAt)}</small></div>;})}<p>마지막 수집 {date(q.reportedAt)}</p><small>연결 서버: {q.servers.map(s=>`${s.host} (${date(s.lastSeen)})`).join(', ')||'보고 없음'}</small></article>)}</div>{quotas.data?.data.length===0&&<p>수집된 구독 계정이 없습니다.</p>}</State>
+    <div className="resource-section-title"><div><h2>CLI 구독 한도</h2><p>{quotas.data?.source==='erp'?'현재 ERP 수집기에 연결되어 있습니다. ':''}Codex·Claude의 사용률입니다. 15분 이상 지난 값·수집 실패·미확인 계정은 현재 한도로 표시하지 않습니다.</p></div><button className="secondary" disabled={refreshing} onClick={()=>void refreshQuotas()}>{refreshing?'수집 결과 확인 중…':'사용량 새로고침'}</button></div>{refreshMessage&&<p role="status" className="info-banner">{refreshMessage}</p>}
+    <State error={quotas.error} loading={!quotas.data}><div className="resource-quota-grid">{quotas.data?.data.map((q,i)=><article className="resource-quota" key={i}><h3>{q.provider} <span>{q.plan}</span></h3><p>{q.account}</p>{(q.issue||q.stale)&&<p className="gpu-warning">{q.issue||'보고 지연 · 현재 한도 확인 불가'}</p>}{q.collecting&&<p>수집 요청 처리 중…</p>}{[['5시간',q.fiveHour],['주간',q.sevenDay]].map(([label,raw])=>{const w=raw as Quota['fiveHour'];return <div key={label as string}>{label==='5시간'&&q.fiveHourUnlimited?<b>5시간: 제한 없음 (ERP 표시)</b>:<><b>{label as string}: {w.percent===null?'확인 불가':`${number(w.percent)}% 사용 · ${number(100-w.percent)}% 남음`}</b><div className="gpu-meter"><i style={{width:`${w.percent??0}%`}}/></div>{!q.stale&&w.resetsAt!==null&&<small>리셋 예정 {date(w.resetsAt)}</small>}</>}</div>;})}<p>마지막 수집 {date(q.reportedAt)}</p><small>수집기 연결: {q.servers.map(s=>`${s.host} (${date(s.lastSeen)})`).join(', ')||'보고 없음'}</small></article>)}</div>{quotas.data?.data.length===0&&<p>수집된 구독 계정이 없습니다.</p>}</State>
     <div className="resource-section-title"><div><h2>API 사용량·비용</h2><p>기존 수집 서버의 집계입니다. 청구서 확정 금액과 다를 수 있으며, 집계 없음은 실제 사용량 0을 뜻하지 않습니다.</p></div></div>
     <div className="resource-controls"><label>비용 기간<select aria-label="비용 기간" value={days} onChange={e=>setDays(e.target.value)}>{[1,7,30,90].map(d=><option key={d} value={d}>최근 {d}일</option>)}</select></label><label>공급자<select aria-label="공급자" value={provider} onChange={e=>setProvider(e.target.value)}><option value="all">전체</option>{['openai','anthropic','google'].map(p=><option key={p}>{p}</option>)}</select></label></div>
     <State error={usage.error} loading={!usage.data}>{usage.data&&<>
