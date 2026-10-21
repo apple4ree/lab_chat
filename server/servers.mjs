@@ -19,7 +19,7 @@ function publicSample(sample,fresh){
   if(fresh)return s;
   return {...s,uptimeSeconds:null,cpu:{...s.cpu,usagePercent:null,load1:null},memory:{...s.memory,availableBytes:null,usedBytes:null,swapFreeBytes:null,cgroupUsedBytes:null,cgroupAvailableBytes:null},disks:s.disks.map(d=>({...d,availableBytes:null,usedBytes:null}))};
 }
-export function createServerMonitor({db,gpu,source=null,analyze=null,emit=()=>{},audit=()=>{},now=Date.now,autoStart=true,intervalMs=30000}){
+export function createServerMonitor({db,gpu,source=null,analyze=null,emit=()=>{},audit=()=>{},now=Date.now,autoStart=true,intervalMs=30000,catalog=null}){
   let stopped=false,timer=null,pending=null,controller=null,analysisTask=null,analysisController=null;
   let checkedAt=null,collectionError=false;
   // Persisted jobs are never silently reported as completed after a process exit.
@@ -121,6 +121,7 @@ export function createServerMonitor({db,gpu,source=null,analyze=null,emit=()=>{}
     const results=source?await source(controller.signal).catch(()=>null):[];
     if(stopped)return;
     initializeManagers();
+    catalog?.sync();
     checkedAt=now();collectionError=results===null;
     const seen=new Set();
     transaction(db,()=>{
@@ -140,17 +141,21 @@ export function createServerMonitor({db,gpu,source=null,analyze=null,emit=()=>{}
   }
   const poll=()=>{if(stopped)return Promise.resolve();if(pending)return pending;pending=collect().finally(()=>{pending=null;});return pending;};
   function view(userId){
+    catalog?.sync();
     const g=gpu?.view(),time=now(),manager=isManager(userId);
+    const metadata=new Map((catalog?.serverRows()||source?.catalog||[]).map(s=>[s.host,s]));
+    const registeredGpus=new Map();for(const r of catalog?.gpuRows()||[]){if(!registeredGpus.has(r.host))registeredGpus.set(r.host,[]);registeredGpus.get(r.host).push(r);}
     const rows=new Map(db.prepare('SELECT * FROM server_observations').all().map(r=>[r.host,r]));
-    for(const entry of source?.catalog||[])if(!rows.has(entry.host))rows.set(entry.host,{host:entry.host,status:'waiting',last_seen:null});
+    for(const entry of metadata.values())if(!rows.has(entry.host))rows.set(entry.host,{host:entry.host,status:'waiting',last_seen:null});
     for(const item of g?.items||[])if(!rows.has(item.host))rows.set(item.host,{host:item.host,status:'waiting',last_seen:item.reportedAt});
-    return {checkedAt,analysisConfigured:!!analyze,isServerManager:manager,alertChannelId:manager?channelId():null,
+    return {canManageResources:catalog?.canManage(db.prepare('SELECT id,role FROM users WHERE id=?').get(userId))||false,checkedAt,analysisConfigured:!!analyze,isServerManager:manager,alertChannelId:manager?channelId():null,
       items:[...rows.values()].map(row=>{
         const s=row.sample?JSON.parse(row.sample):null,inventory=source?.hosts?.includes(row.host)||false;
         const fresh=row.status==='online'&&time-(row.last_seen??0)<=STALE&&checkedAt!==null&&time-checkedAt<intervalMs*3&&!collectionError;
         const devices=(g?.items||[]).filter(x=>x.host===row.host).map(({index,name,memoryTotalMiB,memoryFreeMiB,utilization,status})=>({index,name,memoryTotalMiB,memoryFreeMiB:g.connection==='ok'&&!['offline','unknown'].includes(status)?memoryFreeMiB:null,utilization:g.connection==='ok'&&!['offline','unknown'].includes(status)?utilization:null}));
-        const meta=source?.catalog?.find(t=>t.host===row.host);
-        return {host:row.host,hosting:meta?.hosting||'unknown',note:meta?.note||'',status:fresh?'online':row.incident_id?'offline':'unknown',reportedAt:row.last_seen??null,inventoryConnected:inventory,sample:publicSample(s,fresh&&inventory&&time-s.reportedAt<=STALE),gpus:devices};
+        const meta=metadata.get(row.host);
+        for(const registered of registeredGpus.get(row.host)||[]){const observed=devices.find(d=>d.index===registered.gpu_index);if(observed){observed.label=registered.label;}else devices.push({index:registered.gpu_index,label:registered.label,name:registered.declared_model||'모델 미등록',memoryTotalMiB:null,memoryFreeMiB:null,utilization:null,declaredMemoryGiB:registered.declared_memory_gib,registered:true});}
+        return {host:row.host,label:meta?.label||row.host,declared:meta?.version?{cpuModel:meta.cpu_model,cpuCores:meta.cpu_cores,memoryGiB:meta.memory_gib,storageGiB:meta.storage_gib,ownerName:meta.owner_name}:null,hosting:meta?.hosting||'unknown',note:meta?.note||'',status:fresh?'online':row.incident_id?'offline':'unknown',reportedAt:row.last_seen??null,inventoryConnected:inventory,sample:publicSample(s,fresh&&inventory&&time-s.reportedAt<=STALE),gpus:devices};
       }).sort((a,b)=>a.host.localeCompare(b.host)),
       incidents:manager?db.prepare('SELECT id,host,kind,opened_at,resolved_at,analysis_status,analysis FROM server_incidents ORDER BY id DESC LIMIT 30').all().map(r=>({...r,analysis:r.analysis?JSON.parse(r.analysis):null})):[]};
   }

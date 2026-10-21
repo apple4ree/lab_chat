@@ -8,6 +8,7 @@ import { randomUUID, timingSafeEqual, createHash } from 'node:crypto';
 import { openDatabase, transaction, createUser, createChannel, publicUser, seedDemo } from './db.mjs';
 import { token, hashToken, hashPassword, verifyPassword, getSession, startSession, rateLimiter } from './auth.mjs';
 import {createDemoGate} from './demo-gate.mjs';
+import {createResourceCatalog,mountResourceCatalog} from './resource-catalog.mjs';
 import {createServerMonitor} from './servers.mjs';
 import {createGpuMonitor} from './gpu.mjs';
 import {createResources,mountResources} from './resources.mjs';
@@ -114,9 +115,10 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
 
   const gpuHistory=mode==='demo'?null:createGpuHistory({db});
   const gpu=createGpuMonitor({db,source:gpuSource,emit,history:gpuHistory,demo:mode==='demo',autoStart:gpuAutoStart});
-  const servers=createServerMonitor({db,gpu,source:serverSource,analyze:serverAnalyze,emit,audit,autoStart:gpuAutoStart&&(!!serverSource||!!gpuSource)});
+  const catalog=createResourceCatalog({db,gpu,source:serverSource});
+  const servers=createServerMonitor({db,gpu,catalog,source:serverSource,analyze:serverAnalyze,emit,audit,autoStart:gpuAutoStart&&(!!serverSource||!!gpuSource)});
   const sources=mode==='demo'?createResourceSource({demo:true}):localGpuResourceSource(gpuHistory,resourceSource||createResourceSource());
-  const resources=createResources({db,gpu,emit,source:sources,autoStart:gpuAutoStart});
+  const resources=createResources({db,gpu,catalog,emit,source:sources,autoStart:gpuAutoStart});
 
   app.get('/api/health',(_req,res)=>res.json({ok:true,version:'0.1.0'}));
   app.get('/api/workspace/connection',(_req,res)=>res.json(domains.connection()));
@@ -181,6 +183,7 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   app.get('/api/resources/servers',(req,res)=>res.json(servers.view(req.user.id)));
   app.get('/api/admin/server-managers',(req,res)=>{admin(req);res.json(servers.roleView());});
   app.post('/api/admin/server-managers',(req,res)=>{admin(req);res.json(servers.setManager(req.user.id,req.body.userId,req.body.enabled));});
+  mountResourceCatalog(app,catalog);
   mountResources(app,resources);
   mountDesktopReleases(app,desktopReleaseDir);
   app.get('/api/me',(req,res)=>res.json({...publicUser(req.user),email:req.user.email}));
@@ -442,5 +445,5 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   });
   const closeStreams=()=>{for(const c of clients)c.res.end();};
   let closed=false;
-  return {app,db,setupToken,gpu,resources,servers,closeStreams,close:()=>{if(closed)return;closed=true;metrics.close();void servers.stop();resources.stop();void gpu.stop();closeStreams();db.close();}};
+  return {app,db,setupToken,gpu,resources,servers,catalog,closeStreams,close:()=>{if(closed)return;closed=true;metrics.close();void servers.stop();resources.stop();void gpu.stop();closeStreams();db.close();}};
 }

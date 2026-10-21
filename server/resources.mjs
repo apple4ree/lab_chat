@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createResourceCatalog} from './resource-catalog.mjs';
 import {transaction} from './db.mjs';
 import {createResourceSource,resourceFailure} from './resource-source.mjs';
 
@@ -9,19 +9,14 @@ const statusNames={pending:'신청',reviewing:'검토 중',approved:'승인',all
 const terminal=new Set(['rejected','cancelled','completed','expired']);
 const active=new Set(['approved','allocated']);
 
-export function createResources({db,gpu,emit=()=>{},source=createResourceSource(),now=Date.now,autoStart=true}){
+export function createResources({db,gpu,emit=()=>{},source=createResourceSource(),now=Date.now,autoStart=true,catalog=createResourceCatalog({db,gpu,now})}){
   let timer=null,stopped=false;
   db.prepare("UPDATE channels SET topic=? WHERE kind='public' AND id=(SELECT value FROM app_meta WHERE key='gpu_channel_id') AND topic=?").run('GPU 상태 변화와 예약·배정 알림 · 실제 작업 실행은 별도로 진행합니다.','GPU 상태 변화 알림과 사용 조율 · 예약·실행 제어는 제공하지 않습니다.');
   const audit=(actor,action,id)=>db.prepare('INSERT INTO audit_log(actor_id,action,target_id) VALUES (?,?,?)').run(actor,action,String(id));
   const admin=user=>{if(user.role!=='admin')fail(403,'관리자만 사용할 수 있습니다.');};
   const resource=id=>db.prepare('SELECT * FROM research_resources WHERE id=?').get(str(id,'자원',100))||fail(404,'자원을 찾을 수 없습니다.');
   const reservation=id=>db.prepare('SELECT * FROM resource_reservations WHERE id=?').get(positive(Number(id)))||fail(404,'예약을 찾을 수 없습니다.');
-  function sync(){
-    const view=gpu.view();
-    const insert=db.prepare('INSERT OR IGNORE INTO research_resources(id,host,gpu_index,label) VALUES (?,?,?,?)');
-    transaction(db,()=>{for(const g of view.items)insert.run(randomUUID(),g.host,g.index,`${g.host} · GPU ${g.index}`);});
-    return view;
-  }
+  const sync=()=>catalog.sync();
   function event(r,actor,action,note,channelId){
     db.prepare('INSERT INTO reservation_events(reservation_id,actor_id,action,note,at) VALUES (?,?,?,?,?)').run(r.id,actor,action,note,now());
     audit(actor,`resource.reservation.${action}`,r.id);
@@ -44,7 +39,8 @@ export function createResources({db,gpu,emit=()=>{},source=createResourceSource(
     let memory=null;if(body.memoryGiB!==null&&body.memoryGiB!==undefined&&body.memoryGiB!==''){
       memory=body.memoryGiB;if(typeof memory!=='number'||!Number.isFinite(memory)||memory<=0||memory>100000)fail(400,'필요한 GPU 메모리를 확인해 주세요.');
       const gpuItem=gpu.view().items.find(g=>g.host===r.host&&g.index===r.gpu_index);
-      if(gpuItem?.memoryTotalMiB&&memory>gpuItem.memoryTotalMiB/1024)fail(400,'요청 메모리가 GPU의 전체 메모리보다 큽니다.');
+      const capacity=gpuItem?.memoryTotalMiB?gpuItem.memoryTotalMiB/1024:db.prepare('SELECT memory_gib FROM resource_specs WHERE resource_id=?').get(r.id)?.memory_gib;
+      if(capacity&&memory>capacity)fail(400,'요청 메모리가 GPU의 전체 메모리보다 큽니다.');
     }
     return {resource_id:r.id,project:str(body.project,'프로젝트',120),purpose:str(body.purpose,'사용 목적·근거',2000),starts_at:starts,ends_at:ends,memory_gib:memory};
   }
@@ -69,7 +65,7 @@ export function createResources({db,gpu,emit=()=>{},source=createResourceSource(
       observation:view.items.find(g=>g.host===r.host&&g.index===r.gpu_index)||null,
       current:db.prepare("SELECT b.id,b.project,b.ends_at,u.name AS user_name FROM resource_reservations b JOIN users u ON u.id=b.user_id WHERE b.resource_id=? AND b.status IN ('approved','allocated') AND b.starts_at<=? AND b.ends_at>? ORDER BY b.starts_at").get(r.id,time,time)||null}));
     const reservations=db.prepare(`SELECT b.*,r.label AS resource_label,u.name AS user_name FROM resource_reservations b JOIN research_resources r ON r.id=b.resource_id JOIN users u ON u.id=b.user_id WHERE b.id<? AND (?='all' OR b.status=?) AND (?=0 OR b.user_id=?) ORDER BY b.id DESC LIMIT 51`).all(before,status,status,query.mine==='1'?1:0,user.id);
-    return {resources,reservations:reservations.slice(0,50),nextBefore:reservations.length>50?reservations[49].id:null,serverTime:time};
+    return {canManageResources:catalog.canManage(user),resources,reservations:reservations.slice(0,50),nextBefore:reservations.length>50?reservations[49].id:null,serverTime:time};
   }
   function create(user,body){
     sync();const channel=gpu.ensureChannel();
@@ -108,15 +104,7 @@ export function createResources({db,gpu,emit=()=>{},source=createResourceSource(
       const next=reservation(r.id);event(next,user.id,target,note,channel);return next;
     });changed(channel);return result;
   }
-  function configure(user,id,body){
-    admin(user);return transaction(db,()=>{
-      const r=resource(id);if(positive(body.version)!==r.version)fail(409,'장비 정보가 변경되었습니다. 새로고침해 주세요.');
-      const owner=body.ownerId||null;if(owner&&!db.prepare("SELECT 1 FROM users WHERE id=? AND identity_provider!='system'").get(str(owner,'담당자',100)))fail(400,'담당자를 확인해 주세요.');
-      if(typeof body.enabled!=='boolean')fail(400,'예약 허용 여부를 확인해 주세요.');
-      db.prepare('UPDATE research_resources SET label=?,notes=?,owner_id=?,enabled=?,version=version+1 WHERE id=?').run(str(body.label,'장비 이름',160),str(body.notes??'','장비 안내',2000,0),owner,body.enabled?1:0,r.id);
-      audit(user.id,'resource.configure',id);return resource(id);
-    });
-  }
+  const configure=(user,id,body)=>catalog.configureGpu(user,id,body);
   const periods={hour:3600,day:86400,week:604800,month:2592000};
   function days(value){const n=Number(value??7);if(![1,7,30,90].includes(n))fail(400,'조회 기간을 확인해 주세요.');return n;}
   async function history(query){
