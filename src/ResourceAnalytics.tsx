@@ -22,7 +22,7 @@ export function ResourceHistory(){
   useEffect(()=>{if(targets.data)setSelected(old=>old.length?old:targets.data!.data.slice(0,3).map(t=>JSON.stringify(t)));},[targets.data]);
   useEffect(()=>{
     const c=new AbortController();setSeries([]);setError('');if(!selected.length){setLoading(false);return;}setLoading(true);
-    Promise.all(selected.map(async key=>{const t=JSON.parse(key) as Target;return {label:`${t.host} · GPU ${t.index}`,result:await api<History>(`/resources/history?${new URLSearchParams({host:t.host,gpu:String(t.index),period})}`,{signal:c.signal})};})).then(setSeries).catch(e=>{if(!c.signal.aborted)setError(e.message);}).finally(()=>{if(!c.signal.aborted)setLoading(false);});
+    post<{series:(Target&{result:History})[]}>('/resources/history/batch',{period,targets:selected.map(key=>JSON.parse(key) as Target)},{signal:c.signal,retry:true}).then(data=>{if(!c.signal.aborted)setSeries(data.series.map(t=>({label:`${t.host} · GPU ${t.index}`,result:t.result})));}).catch(e=>{if(!c.signal.aborted)setError(e.message);}).finally(()=>{if(!c.signal.aborted)setLoading(false);});
     return()=>c.abort();
   },[selected,period,revision]);
   const from=series[0]?.result.from??0,to=series[0]?.result.to??1;

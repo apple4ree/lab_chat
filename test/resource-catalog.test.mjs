@@ -4,6 +4,7 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {once} from 'node:events';
+import {DatabaseSync} from 'node:sqlite';
 import {createApp} from '../server/app.mjs';
 const newServer={host:'manual-cloud',label:'클라우드 학습 서버',hosting:'cloud',note:'등록 사양\n실시간 미연결',cpuModel:'Test CPU',cpuCores:32,memoryGiB:128,storageGiB:1024};
 const newGpu={host:'manual-cloud',gpuIndex:0,label:'학습 GPU',model:'H200',memoryGiB:140,enabled:true};
@@ -13,7 +14,7 @@ async function fixture(){
  async function req(path,cookie,body,method=body?'POST':'GET'){const r=await fetch(base+path,{method,headers:{'X-Lab-Request':'1','Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},body:body?JSON.stringify(body):undefined});return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0]};}
  const users=service.db.prepare("SELECT id,role FROM users WHERE identity_provider='demo' ORDER BY role,name").all();const cookies=[];for(const u of users)cookies.push({...u,...await req('/auth/demo',null,{userId:u.id})});const [admin,manager,member]=cookies;
  await req('/admin/server-managers',admin.cookie,{userId:manager.id,enabled:true});
- return {service,req,admin,manager,member,setReports(v){reports=v;},async close(){service.close();server.closeAllConnections();await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});}};
+ return {service,dir,req,admin,manager,member,setReports(v){reports=v;},async close(){service.close();server.closeAllConnections();await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});}};
 }
 test('catalog HTTP API allows admins and server managers, rejects ordinary users and revoked roles',async()=>{
  const f=await fixture();try{
@@ -67,4 +68,19 @@ test('invalid inventory inputs fail atomically; configuration seed never overwri
   const {createResourceCatalog}=await import('../server/resource-catalog.mjs');const source={catalog:[{host:'manual-cloud',hosting:'local',note:'old config'}],hosts:['manual-cloud']};
   createResourceCatalog({db:f.service.db,gpu:f.service.gpu,source}).sync();const row=f.service.db.prepare('SELECT * FROM server_catalog WHERE host=?').get('manual-cloud');assert.equal(row.hosting,'cloud');assert.equal(row.note,newServer.note);
  }finally{await f.close();}
+});
+
+test('unchanged catalog can be read while another connection writes, then discovers new devices without stale identity caching',async()=>{
+ const f=await fixture();const other=new DatabaseSync(join(f.dir,'lab-chat.sqlite'));
+ try{
+  f.setReports([{host:'observed',ts:Date.now()/1000,gpus:[{index:0,name:'Observed',mem_total:81920,mem_used:0,util:0,procs:[]}]}]);
+  await f.service.gpu.poll();f.service.catalog.sync();
+  const before=f.service.catalog.gpuRows()[0];
+  other.exec('BEGIN IMMEDIATE');
+  try{f.service.catalog.sync();assert.equal(f.service.catalog.gpuRows()[0].id,before.id);}finally{other.exec('ROLLBACK');}
+  other.prepare('INSERT INTO research_resources(id,host,gpu_index,label) VALUES(?,?,?,?)').run('external','external-host',0,'External GPU');
+  f.service.catalog.sync();assert.ok(f.service.catalog.serverRows().some(s=>s.host==='external-host'));
+  f.setReports([{host:'external-host',ts:Date.now()/1000,gpus:[{index:0,name:'Observed',mem_total:81920,mem_used:0,util:0,procs:[]}]}]);
+  await f.service.gpu.poll();f.service.catalog.sync();assert.equal(f.service.catalog.gpuRows().find(g=>g.host==='external-host').id,'external');
+ }finally{other.close();await f.close();}
 });

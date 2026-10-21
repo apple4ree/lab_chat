@@ -116,6 +116,60 @@ test('analytics normalization preserves unknowns, strips command/credential fiel
   assert.throws(()=>normalizeResourceData('targets',[{host:'x',gpu:-1}]));
 });
 
+test('batch history API authenticates, bounds work, validates all targets and preserves legacy results',async()=>{
+  const f=await fixture();try{
+    const targets=(await f.req('/resources/targets',{cookie:f.member.cookie})).data.data;
+    const request=body=>f.req('/resources/history/batch',{cookie:f.member.cookie,body});
+    assert.equal((await f.req('/resources/history/batch',{body:{targets}})).status,401);
+    for(const body of [{},{targets:[]},{targets:Array(7).fill(targets[0])},{targets:[targets[0],targets[0]]},{targets:[null]},{targets:[{...targets[0],index:'0'}]},{targets,period:'toString'},{targets,period:['day']}])assert.equal((await request(body)).status,400);
+    assert.equal((await request({targets:[targets[0],{host:'unknown',index:0}]})).status,404);
+    const result=await request({targets:[...targets].reverse(),period:'week'});assert.equal(result.status,200);
+    assert.deepEqual(result.data.series.map(({host,index})=>({host,index})),[...targets].reverse());
+    assert.equal(new Set(result.data.series.map(s=>s.result.to)).size,1);
+    for(const s of result.data.series){
+      const single=await f.req('/resources/history?'+new URLSearchParams({host:s.host,gpu:String(s.index),period:'week'}),{cookie:f.member.cookie});
+      assert.equal(single.status,200);assert.equal(s.result.bucketMs,single.data.bucketMs);
+      // The HTTP requests can straddle a 30-second boundary; compare exact data only in the same window.
+      if(s.result.to===single.data.to)assert.deepEqual(s.result.data,single.data.data);
+      assert.ok(s.result.data.length<=602);assert.equal(s.result.demo,true);
+    }
+  }finally{await f.close();}
+});
+
+test('batch history resolves targets once, uses one time window and never masks upstream failure',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'history-batch-')),db=openDatabase(dir);let time=1800000000000,failHistory=false;
+  const calls=[],targets=Array.from({length:6},(_,index)=>({host:'batch',index}));
+  const source={async get(kind,params){calls.push({kind,params});time+=30001;if(kind==='targets')return {data:targets};if(failHistory&&params.gpu===3)throw Object.assign(new Error('unavailable'),{status:503});return {data:[],fetchedAt:time,demo:false,source:'fixture',bucketMs:900000};},stop(){}};
+  const service=createResources({db,gpu:{view:()=>({items:[]})},source,now:()=>time,autoStart:false});
+  try{
+    const batch=await service.histories({targets,period:'week'});
+    assert.equal(calls.filter(c=>c.kind==='targets').length,1);assert.equal(calls.filter(c=>c.kind==='history').length,6);
+    assert.equal(new Set(batch.series.map(s=>s.result.to)).size,1);assert.equal(batch.series[0].result.bucketMs,900000);
+    calls.length=0;await assert.rejects(service.histories({targets:[targets[0],{host:'missing',index:0}]}),{status:404});assert.equal(calls.length,1);
+    failHistory=true;await assert.rejects(service.histories({targets}),{status:503});
+  }finally{service.stop();db.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('management associates active bookings with the correct device and advances at reservation boundaries',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'resource-current-')),db=openDatabase(dir);let time=1800000000000;
+  const user=createUser(db,{email:'current@example.test',name:'Current',role:'admin'});
+  const gpu=createGpuMonitor({db,source:demoGpuSource,autoStart:false});await gpu.poll();
+  const service=createResources({db,gpu,now:()=>time,autoStart:false});
+  try{
+    const [a,b,c]=service.list(user).resources;
+    const book=(resourceId,start,end)=>service.create(user,{resourceId,project:resourceId,purpose:'boundary',startsAt:start,endsAt:end});
+    const first=book(a.id,time,time+60000),next=book(a.id,time+60000,time+120000),pending=book(b.id,time,time+120000);
+    for(const r of [first,next])service.transition(user,r.id,{version:1,status:'approved'});
+    let rows=service.list(user).resources;
+    assert.equal(rows.find(r=>r.id===a.id).current.id,first.id);assert.equal(rows.find(r=>r.id===b.id).current,null);assert.equal(rows.find(r=>r.id===c.id).current,null);
+    assert.equal(rows.find(r=>r.id===a.id).observation.index,a.gpu_index);
+    service.transition(user,pending.id,{version:1,status:'approved'});service.transition(user,pending.id,{version:2,status:'allocated'});
+    time+=60000;rows=service.list(user).resources;
+    assert.equal(rows.find(r=>r.id===a.id).current.id,next.id);assert.equal(rows.find(r=>r.id===b.id).current.id,pending.id);
+    time+=60000;assert.ok(service.list(user).resources.every(r=>r.current===null));
+  }finally{service.stop();await gpu.stop();db.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('shared analytics cache deduplicates work, never serves stale data after failures and aborts shutdown',async()=>{
   let time=Date.now(),calls=0,fail=false;
   const source=createResourceSource({now:()=>time,reader:async()=>{calls++;if(fail)throw new Error('internal secret');return [{host:'h',gpu:0}];}});

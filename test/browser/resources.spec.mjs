@@ -6,14 +6,33 @@ async function open(page,name='지민'){
   await page.locator('.sidebar').getByRole('button',{name:'연구 자원',exact:true}).click();
 }
 test('resource history supports multi-GPU selection, range/metric controls, tables, and missing selection',async({page})=>{
+  const historyRequests=[];page.on('request',r=>{if(r.url().includes('/api/resources/history'))historyRequests.push(r);});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));await open(page);await page.getByRole('button',{name:'사용 이력',exact:true}).click();
   await expect(page.getByRole('img',{name:'GPU 연산 사용률 이력'})).toBeVisible();await expect(page.locator('.resource-chart path')).toHaveCount(3);await expect(page.locator('.resource-chart path').first()).toBeVisible();
+  expect(historyRequests).toHaveLength(1);expect(historyRequests[0].method()).toBe('POST');expect(historyRequests[0].postDataJSON().targets).toHaveLength(3);
   await page.getByLabel('측정값',{exact:true}).selectOption('memoryGiB');await page.getByLabel('이력 기간',{exact:true}).selectOption('week');
   await expect(page.getByRole('img',{name:'GPU 메모리 사용 이력'})).toBeVisible();await expect(page.locator('.resource-chart path')).toHaveCount(3);
   await page.getByText('수집 시각과 수치 표로 보기',{exact:true}).click();await expect(page.getByRole('cell',{name:'샘플-H200 · GPU 0',exact:true}).first()).toBeVisible();
   await page.getByRole('button',{name:'선택 해제',exact:true}).click();await expect(page.getByText('비교할 GPU를 선택해 주세요.',{exact:true})).toBeVisible();
   await page.getByRole('checkbox',{name:'샘플-H200 · GPU 1',exact:true}).check();await expect(page.locator('.resource-chart path')).toHaveCount(1);
   await expect(page.getByRole('cell',{name:'sample-researcher',exact:true})).toBeVisible();expect(errors).toEqual([]);
+});
+
+test('history cancels superseded selections and shows failures instead of old charts',async({page})=>{
+  await open(page);await page.getByRole('button',{name:'사용 이력',exact:true}).click();await expect(page.locator('.resource-chart path')).toHaveCount(3);
+  let release;const gate=new Promise(resolve=>{release=resolve;});
+  await page.route('**/api/resources/history/batch',async route=>{
+    if(route.request().postDataJSON().period==='month'){await gate;await route.continue().catch(()=>{});}
+    else await route.continue();
+  });
+  const pending=page.waitForRequest(r=>r.url().endsWith('/history/batch')&&r.postDataJSON().period==='month');
+  await page.getByLabel('이력 기간',{exact:true}).selectOption('month');await pending;
+  await page.getByRole('button',{name:'선택 해제',exact:true}).click();release();
+  await expect(page.locator('.resource-chart path')).toHaveCount(0);await expect(page.getByText('비교할 GPU를 선택해 주세요.',{exact:true})).toBeVisible();
+  await page.unroute('**/api/resources/history/batch');
+  await page.route('**/api/resources/history/batch',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'수집 서버 연결 실패'})}));
+  await page.getByRole('checkbox',{name:'샘플-H200 · GPU 1',exact:true}).check();
+  await expect(page.getByRole('alert')).toHaveText('수집 서버 연결 실패');await expect(page.locator('.resource-chart path')).toHaveCount(0);
 });
 
 test('members request reservations; admins review, approve, assign, and record audited decisions',async({page,browser})=>{

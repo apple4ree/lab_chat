@@ -61,9 +61,16 @@ export function createResources({db,gpu,emit=()=>{},source=createResourceSource(
   function list(user,query={}){
     tick();const view=sync(),time=now(),before=query.before===undefined?Number.MAX_SAFE_INTEGER:positive(Number(query.before));
     const status=query.status||'all';if(status!=='all'&&!Object.hasOwn(statusNames,status))fail(400,'예약 상태를 확인해 주세요.');
+    const observations=new Map(view.items.map(g=>[JSON.stringify([g.host,g.index]),g]));
+    const current=new Map(db.prepare(`SELECT id,project,ends_at,user_name,resource_id FROM (
+      SELECT b.id,b.project,b.ends_at,u.name AS user_name,b.resource_id,
+        row_number() OVER (PARTITION BY b.resource_id ORDER BY b.starts_at,b.id) AS position
+      FROM resource_reservations b JOIN users u ON u.id=b.user_id
+      WHERE b.status IN ('approved','allocated') AND b.starts_at<=? AND b.ends_at>?
+    ) WHERE position=1`).all(time,time).map(({resource_id,...booking})=>[resource_id,booking]));
     const resources=db.prepare('SELECT r.*,u.name AS owner_name FROM research_resources r LEFT JOIN users u ON u.id=r.owner_id ORDER BY r.host,r.gpu_index').all().map(r=>({...r,
-      observation:view.items.find(g=>g.host===r.host&&g.index===r.gpu_index)||null,
-      current:db.prepare("SELECT b.id,b.project,b.ends_at,u.name AS user_name FROM resource_reservations b JOIN users u ON u.id=b.user_id WHERE b.resource_id=? AND b.status IN ('approved','allocated') AND b.starts_at<=? AND b.ends_at>? ORDER BY b.starts_at").get(r.id,time,time)||null}));
+      observation:observations.get(JSON.stringify([r.host,r.gpu_index]))||null,
+      current:current.get(r.id)||null}));
     const reservations=db.prepare(`SELECT b.*,r.label AS resource_label,u.name AS user_name FROM resource_reservations b JOIN research_resources r ON r.id=b.resource_id JOIN users u ON u.id=b.user_id WHERE b.id<? AND (?='all' OR b.status=?) AND (?=0 OR b.user_id=?) ORDER BY b.id DESC LIMIT 51`).all(before,status,status,query.mine==='1'?1:0,user.id);
     return {canManageResources:catalog.canManage(user),resources,reservations:reservations.slice(0,50),nextBefore:reservations.length>50?reservations[49].id:null,serverTime:time};
   }
@@ -107,15 +114,27 @@ export function createResources({db,gpu,emit=()=>{},source=createResourceSource(
   const configure=(user,id,body)=>catalog.configureGpu(user,id,body);
   const periods={hour:3600,day:86400,week:604800,month:2592000};
   function days(value){const n=Number(value??7);if(![1,7,30,90].includes(n))fail(400,'조회 기간을 확인해 주세요.');return n;}
-  async function history(query){
-    const span=periods[query.period||'day'];if(!span)fail(400,'이력 기간을 확인해 주세요.');
-    const host=str(query.host,'서버',100),index=Number(query.gpu);if(!Number.isSafeInteger(index)||index<0)fail(400,'GPU 번호를 확인해 주세요.');
-    const targets=(await source.get('targets')).data;
-    if(!targets.some(t=>t.host===host&&t.index===index))fail(404,'이력을 조회할 수 없는 GPU입니다.');
+  async function histories(query){
+    const period=query?.period??'day';
+    if(typeof period!=='string'||!Object.hasOwn(periods,period))fail(400,'이력 기간을 확인해 주세요.');
+    const span=periods[period];
+    if(!Array.isArray(query?.targets)||query.targets.length<1||query.targets.length>6)fail(400,'비교할 GPU를 1~6개 선택해 주세요.');
+    const selected=query.targets.map(t=>{
+      const host=str(t?.host,'서버',100),index=t?.index;
+      if(!Number.isSafeInteger(index)||index<0)fail(400,'GPU 번호를 확인해 주세요.');
+      return {host,index};
+    });
+    const keys=selected.map(t=>JSON.stringify([t.host,t.index]));
+    if(new Set(keys).size!==keys.length)fail(400,'중복된 GPU를 선택할 수 없습니다.');
+    const targets=new Set((await source.get('targets')).data.map(t=>JSON.stringify([t.host,t.index])));
+    if(keys.some(key=>!targets.has(key)))fail(404,'이력을 조회할 수 없는 GPU입니다.');
     const to=Math.floor(now()/30000)*30,bucket=Math.max(60,Math.ceil(span/300));
-    const result=await source.get('history',{host,gpu:index,from:to-span,to,bucket});
-    return {...result,from:(to-span)*1000,to:to*1000,bucketMs:result.bucketMs??bucket*1000};
+    return {series:await Promise.all(selected.map(async target=>{
+      const result=await source.get('history',{host:target.host,gpu:target.index,from:to-span,to,bucket});
+      return {...target,result:{...result,from:(to-span)*1000,to:to*1000,bucketMs:result.bucketMs??bucket*1000}};
+    }))};
   }
+  async function history(query){return (await histories({period:query.period,targets:[{host:query.host,index:Number(query.gpu)}]})).series[0].result;}
   async function usage(query){
     const provider=query.provider||'all';if(!['all','openai','anthropic','google'].includes(provider))fail(400,'공급자를 확인해 주세요.');
     const result=await source.get('usage',{days:days(query.days??30),provider});
@@ -132,7 +151,7 @@ export function createResources({db,gpu,emit=()=>{},source=createResourceSource(
     });
   }
   if(autoStart){timer=setInterval(()=>{try{tick();}catch{console.error('Resource reservation timer failed');}},30000);timer.unref();}
-  return {list,create,update,transition,configure,history,usage,balance,tick,
+  return {list,create,update,transition,configure,history,histories,usage,balance,tick,
     targets:()=>source.get('targets'),share:q=>source.get('share',{days:days(q.days)}),quotas:()=>source.get('quotas'),refreshQuotas:()=>source.refreshQuotas?source.refreshQuotas():source.get('quotas'),
     events:id=>{const r=reservation(id);return db.prepare('SELECT e.*,u.name AS actor_name FROM reservation_events e LEFT JOIN users u ON u.id=e.actor_id WHERE e.reservation_id=? ORDER BY e.id DESC LIMIT 100').all(r.id);},
     stop(){stopped=true;if(timer)clearInterval(timer);source.stop();}};
@@ -147,6 +166,7 @@ export function mountResources(app,service){
   app.put('/api/resources/inventory/:id',(req,res)=>res.json(service.configure(req.user,req.params.id,req.body)));
   app.get('/api/resources/targets',async(_req,res)=>res.json(await service.targets()));
   app.get('/api/resources/history',async(req,res)=>res.json(await service.history(req.query)));
+  app.post('/api/resources/history/batch',async(req,res)=>res.json(await service.histories(req.body)));
   app.get('/api/resources/share',async(req,res)=>res.json(await service.share(req.query)));
   app.post('/api/resources/quotas/refresh',async(_req,res)=>res.status(202).json(await service.refreshQuotas()));
   app.get('/api/resources/quotas',async(_req,res)=>res.json(await service.quotas()));

@@ -16,13 +16,20 @@ export function createResourceCatalog({db,gpu,source=null,now=Date.now}){
   function sync(){
     const view=gpu?.view()||{items:[],connection:'waiting'};
     const candidates=new Map((source?.catalog||[]).map(s=>[s.host,s]));
-    for(const row of db.prepare('SELECT host FROM server_observations UNION SELECT host FROM research_resources').all())if(!candidates.has(row.host))candidates.set(row.host,{host:row.host});
+    const registered=db.prepare('SELECT host,gpu_index FROM research_resources').all();
+    const devices=new Set(registered.map(g=>JSON.stringify([g.host,g.gpu_index])));
+    const hosts=new Set(db.prepare('SELECT host FROM server_catalog').all().map(s=>s.host));
+    for(const row of [...db.prepare('SELECT host FROM server_observations').all(),...registered])if(!candidates.has(row.host))candidates.set(row.host,{host:row.host});
     for(const g of view.items)if(!candidates.has(g.host))candidates.set(g.host,{host:g.host});
-    transaction(db,()=>{
+    const missingServers=[...candidates.values()].filter(s=>!hosts.has(s.host));
+    const missingGpus=view.items.filter(g=>!devices.has(JSON.stringify([g.host,g.index])));
+    // Read current identities each time: another connection can register resources.
+    // Stable inventory needs no write lock, UUIDs or INSERT attempts.
+    if(missingServers.length||missingGpus.length)transaction(db,()=>{
       const insert=db.prepare('INSERT OR IGNORE INTO server_catalog(host,label,hosting,note,created_at,updated_at) VALUES(?,?,?,?,?,?)');
-      for(const s of candidates.values())insert.run(s.host,s.host,s.hosting||'unknown',s.note||'',now(),now());
+      for(const s of missingServers)insert.run(s.host,s.host,s.hosting||'unknown',s.note||'',now(),now());
       const gpuInsert=db.prepare('INSERT OR IGNORE INTO research_resources(id,host,gpu_index,label) VALUES(?,?,?,?)');
-      for(const g of view.items)gpuInsert.run(randomUUID(),g.host,g.index,`${g.host} · GPU ${g.index}`);
+      for(const g of missingGpus)gpuInsert.run(randomUUID(),g.host,g.index,`${g.host} · GPU ${g.index}`);
     });return view;
   }
   const serverRows=()=>db.prepare('SELECT s.*,u.name AS owner_name FROM server_catalog s LEFT JOIN users u ON u.id=s.owner_id ORDER BY s.host').all();
