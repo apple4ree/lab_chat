@@ -151,3 +151,9 @@ EXE 한 개·DMG 두 개의 다운로드 UI와 Range 206, 로컬 파일 바이�
 배포 전 `.data/domain-backup/20261021T015234Z`에 일반/체험 SQLite·첨부파일과 기존 dist를 백업했습니다. `lab-chat`과 `lab-chat-demo`만 재시작했습니다. 공개 HTML과 로컬 빌드의 일치, 공개 연결 설정 API의 대표 주소/revision 0, 실제 공인 HTTPS 도메인 확인 요청 성공을 검증했습니다. 배포 전후 계정·로그인명·채널·메시지·첨부파일·멤버십·예약 테이블 해시가 모두 일치했고 SQLite integrity는 ok입니다. 체험 공개 경로의 공유 인증 차단도 유지됩니다.
 
 현재 JS gzip 비교 크기는 95,722 → 97,091 bytes, CSS는 9,201 → 9,391 bytes입니다. 기존 크기 예산을 통과했고 새 런타임 의존성을 추가하지 않았습니다. 실제 외부 도메인의 전환과 Windows/macOS에서 도메인 이전 전체 흐름은 아직 실행하지 않았습니다.
+
+운영 관리자 로그인 후 **설정 → 접속 도메인 관리** 화면, 현재 주소, 입력란 표시와 브라우저 오류 없음도 확인했습니다. 이 확인에서 도메인 설정은 변경하지 않았고 사용한 로그인 세션은 로그아웃했습니다. 화면 증거: `.data/deploy/evidence/domain-admin-production.png`와 JSON.
+
+[DAMI Chat v0.1.2](https://github.com/apple4ree/lab_chat/releases/tag/v0.1.2)를 게시했습니다. [GitHub 실행 39529959811](https://github.com/apple4ree/lab_chat/actions/runs/39529959811)의 Windows x64·macOS arm64·macOS x64 세 작업이 모두 성공했습니다. 태그/설치 파일 소스는 `e19668e314d654be9f071e58616f14a64fdb038c`입니다. 패키지에 새 `connection.cjs`가 포함되는지도 해시로 확인합니다.
+
+설치 파일 및 체크섬 파일의 GitHub digest가 검증된 로컬 파일과 일치하며, 익명 Range 다운로드 206과 선두 바이트, 체크섬 파일 전체 일치를 확인했습니다. 운영 다운로드 manifest를 v0.1.2 GitHub Release로 연결했습니다. 이전 v0.1.1 설치 파일과 manifest는 복구를 위해 유지합니다. 새 설치 파일 크기: Windows 111,974,320 bytes, Mac arm64 128,647,039 bytes, Mac x64 134,193,004 bytes. 합계는 이전보다 1,835 bytes 작으며 패키지 압축 결과의 차이입니다. 정식 개발자 서명·Apple 공증·자동 업데이트 활성화는 이번 변경에 포함되지 않습니다.
