@@ -20,6 +20,13 @@ export function mountDesktopReleases(app,directory){
     return {version:data.version,releaseUrl,files};
   }
   app.get('/api/desktop/releases',async(_req,res)=>res.json(await manifest()));
+  // Public update metadata contains only installers already published on GitHub.
+  // The native main process fetches this without workspace cookies or login tokens.
+  app.get('/desktop/updates/latest.json',async(_req,res)=>{
+    const data=await manifest();
+    res.set('Cache-Control','no-store');
+    res.json(data.releaseUrl?{version:data.version,files:data.files.filter(f=>f.nativeTested&&/\.(exe|dmg)$/.test(f.name))}:{version:null,files:[]});
+  });
   app.get('/api/desktop/releases/:name',async(req,res)=>{
     const file=(await manifest()).files.find(f=>f.name===req.params.name);
     if(!file)return res.status(404).json({error:'설치 파일을 찾을 수 없습니다.'});

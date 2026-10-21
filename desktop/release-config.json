@@ -1,5 +1,5 @@
 {
   "workspaceUrl": "https://chat.damilab.cc",
   "signedRelease": false,
-  "updateUrl": null
+  "updateUrl": "https://chat.damilab.cc/desktop/updates/latest.json"
 }

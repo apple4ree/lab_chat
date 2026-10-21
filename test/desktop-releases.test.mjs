@@ -13,6 +13,7 @@ for(const extension of ['zip','exe','dmg'])test(`desktop ${extension} downloads 
   const service=createApp({dataDir:join(dir,'db'),mode:'demo',desktopReleaseDir:release}),server=service.app.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${server.address().port}`;
   try{
     assert.equal((await fetch(base+'/api/desktop/releases')).status,401);assert.equal((await fetch(base+'/api/desktop/releases/'+name)).status,401);
+    const emptyFeed=await fetch(base+'/desktop/updates/latest.json');assert.equal(emptyFeed.status,200);assert.deepEqual(await emptyFeed.json(),{version:null,files:[]});
     const user=service.db.prepare("SELECT id FROM users WHERE identity_provider='demo' LIMIT 1").get();
     const login=await fetch(base+'/api/auth/demo',{method:'POST',headers:{'X-Lab-Request':'1','Content-Type':'application/json'},body:JSON.stringify({userId:user.id})});const headers={Cookie:login.headers.get('set-cookie').split(';')[0]};
     const listing=await(await fetch(base+'/api/desktop/releases',{headers})).json();assert.equal(listing.files[0].sha256,sha256);assert.equal(listing.files[0].signed,false);assert.equal(listing.files[0].nativeTested,extension!=='zip');
@@ -23,6 +24,9 @@ for(const extension of ['zip','exe','dmg'])test(`desktop ${extension} downloads 
     manifest.releaseUrl='https://github.com/apple4ree/lab_chat/releases/tag/v0.1.0';writeFileSync(join(release,'manifest.json'),JSON.stringify(manifest));
     const github=await(await fetch(base+'/api/desktop/releases',{headers})).json();
     assert.equal(github.releaseUrl,manifest.releaseUrl);
+    const updateFeed=await fetch(base+'/desktop/updates/latest.json');assert.equal(updateFeed.status,200);assert.equal(updateFeed.headers.get('cache-control'),'no-store');
+    const update=await updateFeed.json();assert.equal(update.version,'0.1.0');assert.equal(update.files.length,extension==='zip'?0:1);
+    if(extension!=='zip')assert.equal(update.files[0].url,`https://github.com/apple4ree/lab_chat/releases/download/v0.1.0/${name}`);
     assert.equal(github.files[0].url,`https://github.com/apple4ree/lab_chat/releases/download/v0.1.0/${name}`);
     assert.equal((await fetch(base+'/api/desktop/releases/'+name,{headers})).status,200);
     manifest.releaseUrl='https://example.invalid/releases/tag/v0.1.0';writeFileSync(join(release,'manifest.json'),JSON.stringify(manifest));

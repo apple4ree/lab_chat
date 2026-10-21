@@ -12,7 +12,7 @@ app.setName('DAMI Chat');app.setAppUserModelId('cc.damilab.chat');app.enableSand
 if(!app.isPackaged&&process.env.LAB_DESKTOP_USER_DATA)app.setPath('userData',resolve(process.env.LAB_DESKTOP_USER_DATA));
 let origin=workspaceURL(release,{packaged:app.isPackaged,developmentUrl:process.env.LAB_DESKTOP_URL});
 const offline=pathToFileURL(join(__dirname,'offline.html')).href;
-let win,tray,quitting=false,settings,unread=0,checkUpdates,pendingChannel=null;
+let win,tray,quitting=false,settings,unread=0,updates,pendingChannel=null;
 const tracker=createTracker(),notifications=new Set();
 const defaults={notifications:true,background:true,width:1280,height:860};
 const settingsFile=join(app.getPath('userData'),'desktop-settings.json');
@@ -40,7 +40,7 @@ function menu(){
     {label:'시스템 알림',type:'checkbox',checked:settings.notifications,click:item=>{settings.notifications=item.checked;saveSettings();if(!item.checked)clearNotifications();menu();}},
     {label:'창을 닫아도 계속 실행',type:'checkbox',checked:settings.background,enabled:Boolean(tray)||process.platform==='darwin',click:item=>{settings.background=item.checked;saveSettings();menu();}},
     {label:'컴퓨터 로그인 시 실행',type:'checkbox',enabled:canLogin,checked:canLogin&&app.getLoginItemSettings().openAtLogin,click:item=>app.setLoginItemSettings({openAtLogin:item.checked})},
-    {label:'업데이트 확인',click:()=>void checkUpdates()},{type:'separator'},{label:'DAMI Chat 종료',accelerator:'CmdOrCtrl+Q',click:()=>app.quit()}];
+    {label:'업데이트 확인',click:()=>void updates.check()},{type:'separator'},{label:'DAMI Chat 종료',accelerator:'CmdOrCtrl+Q',click:()=>app.quit()}];
   if(tray)tray.setContextMenu(Menu.buildFromTemplate(options));
   Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'DAMI Chat',submenu:options},{label:'편집',submenu:[{role:'undo'},{role:'redo'},{type:'separator'},{role:'cut'},{role:'copy'},{role:'paste'},{role:'selectAll'}]},
     {label:'보기',submenu:[{label:'다시 연결',accelerator:'CmdOrCtrl+R',click:()=>void loadWorkspace()},{role:'resetZoom'},{role:'zoomIn'},{role:'zoomOut'},{role:'togglefullscreen'},...(!app.isPackaged?[{role:'toggleDevTools'}]:[])]},
@@ -68,7 +68,7 @@ async function openExternal(raw){const url=externalURL(raw);if(!url)return;try{a
 
 if(!app.requestSingleInstanceLock()){app.quit();}else{
   app.on('second-instance',show);app.on('activate',show);
-  app.on('before-quit',()=>{quitting=true;clearNotifications();});
+  app.on('before-quit',()=>{quitting=true;updates?.stop();clearNotifications();});
   app.on('window-all-closed',()=>app.quit());
   app.whenReady().then(()=>{
     settings=loadSettings();
@@ -79,7 +79,8 @@ if(!app.requestSingleInstanceLock()){app.quit();}else{
     sess.setPermissionCheckHandler((wc,p,requestOrigin)=>Boolean(wc&&sameOrigin(wc.getURL(),origin)&&sameOrigin(requestOrigin,origin)&&p==='clipboard-sanitized-write'));
     win=new BrowserWindow({width:Math.min(settings.width,display.width),height:Math.min(settings.height,display.height),minWidth:800,minHeight:600,show:false,title:'DAMI Chat',backgroundColor:'#f5f8f1',icon:join(__dirname,'assets/icon.png'),
       webPreferences:{preload:join(__dirname,'preload.cjs'),partition:'persist:dami-workspace',nodeIntegration:false,nodeIntegrationInWorker:false,contextIsolation:true,sandbox:true,webSecurity:true,allowRunningInsecureContent:false,webviewTag:false,backgroundThrottling:false}});
-    checkUpdates=installUpdates({app,dialog,config:release,getWindow:()=>win});
+    updates=installUpdates({app,dialog,shell,config:release,getWindow:()=>win,onState:state=>{if(!win.isDestroyed()&&sameOrigin(win.webContents.getURL(),origin))win.webContents.send('dami:update-state',state);}});
+    updates.start();
     try{const icon=nativeImage.createFromPath(join(__dirname,'assets',process.platform==='darwin'?'trayTemplate.png':'icon.png')).resize({width:20,height:20});if(process.platform==='darwin')icon.setTemplateImage(true);tray=new Tray(icon);tray.on('click',show);tray.on('double-click',show);}catch{tray=null;}
     menu();badges(0);
     win.on('ready-to-show',show);win.on('page-title-updated',event=>{event.preventDefault();});
@@ -99,6 +100,8 @@ if(!app.requestSingleInstanceLock()){app.quit();}else{
     });
     ipcMain.handle('dami:retry',event=>{if(!trusted(event,true))throw new Error('Untrusted sender');void loadWorkspace();return true;});
     ipcMain.handle('dami:change-workspace',event=>{if(!trusted(event))throw new Error('Untrusted sender');return loadWorkspace({ask:true});});
+    ipcMain.handle('dami:update-state',event=>{if(!trusted(event))throw new Error('Untrusted sender');return updates.getState();});
+    ipcMain.handle('dami:check-updates',event=>{if(!trusted(event))throw new Error('Untrusted sender');return updates.check();});
     ipcMain.handle('dami:active',event=>{if(!trusted(event))throw new Error('Untrusted sender');return win.isVisible()&&win.isFocused()&&!win.isMinimized();});
     ipcMain.handle('dami:state',(event,input)=>{
       if(!trusted(event))throw new Error('Untrusted sender');const state=parseState(input);

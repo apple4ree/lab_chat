@@ -18,6 +18,7 @@ export function DesktopDownloads({onClose}:{onClose:()=>void}){
     {data?.files.some(f=>!f.signed)&&<p className="info-banner">사내 시험판 {data.version}입니다. 정식 개발자 서명·Apple 공증 전이므로 운영체제에서 확인되지 않은 앱으로 표시되거나 실행이 제한될 수 있습니다.</p>}
     {data?.files.map(f=><div className="desktop-download" key={f.name}><h3>{f.platform==='windows'?'Windows · 64비트':f.arch==='arm64'?'macOS · Apple Silicon (M 시리즈)':'macOS · Intel'}</h3><p>{instructions(f.name,f.platform)}</p><a className="primary" href={f.url} target={data.releaseUrl?'_blank':undefined} rel="noopener noreferrer" download={!data.releaseUrl}>{format(f.name)==='exe'?'Windows 설치 파일 (.exe)':format(f.name)==='dmg'?'Mac 설치 파일 (.dmg)':'앱 ZIP'} 다운로드 · {(f.bytes/1048576).toFixed(0)} MB</a>{f.nativeTested&&<p className="small-text muted">설치·실행 자동 검증 완료</p>}<details><summary>파일 확인용 SHA-256</summary><code>{f.sha256}</code></details></div>)}
     {data?.files.length===0&&<p>아직 배포된 설치 파일이 없습니다.</p>}
-    <p className="small-text muted">시스템 알림·트레이/메뉴바·읽지 않은 메시지 배지를 지원합니다. 창을 닫은 뒤에도 알림을 받으려면 앱 메뉴에서 ‘창을 닫아도 계속 실행’을 켜 두세요. 시험판 업데이트는 새 설치 파일로 진행합니다.</p>
+    {window.damiDesktop?.checkUpdates&&<button className="secondary" onClick={()=>void window.damiDesktop?.checkUpdates?.()}>설치된 앱 업데이트 확인</button>}
+    <p className="small-text muted">v0.1.3부터 앱 실행 후와 6시간마다 새 버전을 확인합니다. 앱 메뉴의 ‘업데이트 확인’으로 다운로드·파일 검증·설치를 진행할 수 있습니다. Mac은 DMG에서 Applications로 옮겨 교체합니다. 이전 버전은 이번 한 번 새 설치 파일로 업데이트해 주세요.</p>
   </Dialog>;
 }

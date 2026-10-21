@@ -2,9 +2,10 @@ import {useEffect,useRef} from 'react';
 import type {Channel} from './api';
 
 type DesktopState={userId:string|null;activeChannelId:string|null;channels:{id:string;unread:number;mentions:number;latestMessageId:number}[]};
+export type DesktopUpdateState={phase:'idle'|'checking'|'current'|'available'|'downloading'|'ready'|'error';currentVersion:string;latestVersion:string|null;progress:number|null;format:string|null;error:string|null};
 declare global {
   interface Window {
-    damiDesktop?:{version:number;changeWorkspace?:()=>Promise<boolean>;setState:(state:DesktopState)=>Promise<{unread:number}>;isActive?:()=>Promise<boolean>;onActivity?:(callback:(active:boolean)=>void)=>()=>void;onNavigate:(callback:(id:string)=>void)=>()=>void;retry:()=>Promise<boolean>};
+    damiDesktop?:{version:number;getUpdateState?:()=>Promise<DesktopUpdateState>;checkUpdates?:()=>Promise<DesktopUpdateState>;onUpdateState?:(callback:(state:DesktopUpdateState)=>void)=>()=>void;changeWorkspace?:()=>Promise<boolean>;setState:(state:DesktopState)=>Promise<{unread:number}>;isActive?:()=>Promise<boolean>;onActivity?:(callback:(active:boolean)=>void)=>()=>void;onNavigate:(callback:(id:string)=>void)=>()=>void;retry:()=>Promise<boolean>};
   }
 }
 export function clearDesktopSession(){void window.damiDesktop?.setState({userId:null,activeChannelId:null,channels:[]}).catch(()=>{});}

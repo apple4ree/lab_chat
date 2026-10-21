@@ -24,7 +24,9 @@ try{
   const preferences=await app.evaluate(({BrowserWindow})=>{const p=BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences();return {sandbox:p.sandbox,nodeIntegration:p.nodeIntegration,contextIsolation:p.contextIsolation,webSecurity:p.webSecurity};});
   assert.deepEqual(preferences,{sandbox:true,nodeIntegration:false,contextIsolation:true,webSecurity:true});
   assert.equal(await page.evaluate(()=>typeof window.require),'undefined');
-  assert.equal(await page.evaluate(()=>window.damiDesktop.version),1);result.checks.push('isolated-renderer');
+  assert.equal(await page.evaluate(()=>window.damiDesktop.version),2);result.checks.push('isolated-renderer');
+  const runningVersion=await app.evaluate(({app})=>app.getVersion());
+  assert.equal((await page.evaluate(()=>window.damiDesktop.getUpdateState())).currentVersion,runningVersion);result.checks.push('updater-bridge');
   const config=await(await fetch(origin+'/api/auth/config')).json();const member=config.demoUsers.find(u=>u.role==='member');
   const login=await fetch(origin+'/api/auth/demo',{method:'POST',headers:{'X-Lab-Request':'1','Content-Type':'application/json'},body:JSON.stringify({userId:member.id})});const cookie=login.headers.get('set-cookie').split(';')[0];
   const channelResponse=await fetch(origin+'/api/channels',{method:'POST',headers:{Cookie:cookie,'X-Lab-Request':'1','Content-Type':'application/json'},body:JSON.stringify({name:'desktop-smoke'})});assert.equal(channelResponse.status,201);const target=await channelResponse.json();

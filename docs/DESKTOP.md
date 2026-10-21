@@ -1,4 +1,4 @@
-# DAMI Chat 데스크톱 설치판 0.1.1
+# DAMI Chat 데스크톱 설치판 0.1.3
 
 Windows x64 설치용 EXE와 macOS 13 이상 Apple Silicon·Intel용 DMG를 제공합니다. 앱은 `https://chat.damilab.cc`에 연결해 웹과 같은 계정·대화·파일·GPU 자원을 사용합니다. DB나 관리자 계정은 설치 파일에 포함하지 않습니다.
 
@@ -8,7 +8,17 @@ Windows x64 설치용 EXE와 macOS 13 이상 Apple Silicon·Intel용 DMG를 제�
 2. Windows에서는 EXE를 실행해 설치한 뒤 시작 메뉴의 **DAMI Chat**을 엽니다. 제거는 Windows 앱 설정에서 진행합니다. 사용자 프로필은 제거해도 기본적으로 보존됩니다.
 3. Mac에서는 DMG를 열고 **DAMI Chat → Applications**로 끌어다 놓은 뒤 응용 프로그램 폴더에서 실행합니다. M 시리즈는 Apple Silicon, 이전 Intel Mac은 Intel 버전을 선택합니다.
 
-사내 시험판입니다. Windows는 개발자 코드 서명 전이고, Mac은 무결성 검사용 ad-hoc 서명만 적용해 Apple Developer ID 서명·공증은 없습니다. 운영체제에서 경고하거나 실행을 제한할 수 있습니다. 자동 업데이트 배포 채널은 활성화하지 않았으며 새 설치 파일로 업데이트합니다. `release-config.json`의 `signedRelease=false`, `updateUrl=null`을 유지합니다.
+사내 시험판입니다. Windows는 개발자 코드 서명 전이고, Mac은 무결성 검사용 ad-hoc 서명만 적용해 Apple Developer ID 서명·공증은 없습니다. 운영체제에서 경고하거나 실행을 제한할 수 있습니다. v0.1.3부터 새 버전 자동 확인과 사용자 승인 후 다운로드·검증·설치 파일 열기를 지원합니다. OS 확인이나 설치 단계를 우회하지 않습니다.
+
+## 업데이트
+
+이전 v0.1.2 이하 앱은 업데이트 기능 코드가 없으므로 v0.1.3 설치 파일로 한 번 교체해야 합니다. 서버의 최신 화면에서 이전 앱에 설치 안내를 표시합니다. 웹 기능 변경은 기존처럼 새로고침으로 반영됩니다.
+
+v0.1.3은 실행 10초 후 및 6시간마다 새 버전을 확인합니다. 새 버전이 있으면 화면 상단에 표시하고, **DAMI Chat → 업데이트 확인** 또는 화면의 업데이트 버튼으로 다운로드를 승인합니다. 진행률을 표시하며, 다운로드가 끝나도 설치 파일을 열기 전 앱 종료를 별도로 확인합니다. Windows는 EXE 설치 안내를 따르고, Mac은 DMG의 앱을 Applications로 옮겨 교체합니다. 로그인 정보와 서버 대화는 보존됩니다. 현재 방식은 무인 자동 교체가 아닙니다. macOS의 기본 자동 교체는 정식 서명 요건이 있는 별도 단계입니다([Electron 문서](https://www.electronjs.org/docs/latest/api/auto-updater)).
+
+`desktop/updates.cjs`가 네이티브 메인 프로세스에서 공개 HTTPS 피드 `https://chat.damilab.cc/desktop/updates/latest.json`를 읽습니다. 워크스페이스 쿠키·토큰은 보내지 않습니다. 피드는 GitHub에 게시된 설치 파일의 버전·대상·크기·SHA-256만 제공하며, 세션이 필요한 기존 다운로드 API의 권한을 바꾸지 않습니다. 워크스페이스 도메인 이전과 업데이트 배포 주소는 별개입니다. 기존 업데이트 주소는 이후 배포본에서도 조회 가능하게 유지해야 합니다.
+
+버전 역행, 잘못된 OS/아키텍처, 다른 저장소 URL, 검증되지 않은 설치 파일, 예상 크기·해시 불일치는 거부합니다. GitHub에서 정확한 `release-assets.githubusercontent.com` HTTPS 호스트로의 다운로드 리다이렉트만 허용합니다. 피드는 64KiB/15초, 설치 파일은 1GiB/15분 제한이며 디스크로 스트리밍합니다. 부분 파일은 검증 전 실행되지 않습니다. 현재 사용자 앱 데이터의 전용 `updates` 폴더에서 선택된 설치 파일만 보관하고, 재시도에서는 이미 받은 파일을 재검증해 재사용합니다. SHA-256은 배포 피드와 파일의 일치를 확인하며 개발자 코드 서명을 대체하지 않습니다.
 
 ## 앱 동작
 
@@ -28,7 +38,7 @@ Electron은 Node 접근을 허용하지 않는 sandbox/contextIsolation 렌더�
 | Mac Apple Silicon | macos-15 | `DAMI-Chat-<버전>-mac-arm64.dmg` |
 | Mac Intel | macos-15-intel | `DAMI-Chat-<버전>-mac-x64.dmg` |
 
-Electron 44.9.0, electron-builder 26.15.3, electron-updater 6.8.9는 `desktop/package-lock.json`으로 고정합니다. Node 버전은 루트 `.nvmrc`를 사용합니다. 버전을 올릴 때 `desktop/package.json`과 lockfile을 함께 변경합니다.
+Electron 44.9.0, electron-builder 26.15.3은 `desktop/package-lock.json`으로 고정합니다. 업데이트는 현재 설치 형식에 맞춘 자체 다운로드 흐름을 사용하며, 사용하지 않는 electron-updater 런타임 의존성은 제거했습니다. Node 버전은 루트 `.nvmrc`를 사용합니다. 버전을 올릴 때 `desktop/package.json`과 lockfile을 함께 변경합니다.
 
 ```bash
 # GitHub에서 빌드

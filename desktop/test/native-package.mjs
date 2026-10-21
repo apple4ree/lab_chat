@@ -47,12 +47,18 @@ try{
   assert(!asar.listPackage(archive).some(n=>/\/(\.data|\.env|server)(\/|$)/.test(n)));checks.push('packaged-source-match');
   app=await electron.launch({executablePath:executable,timeout:60000});
   const window=await app.firstWindow();window.setDefaultTimeout(45000);
-  const state=await app.evaluate(({app,BrowserWindow})=>({packaged:app.isPackaged,version:app.getVersion(),preferences:(()=>{const p=BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences();return {sandbox:p.sandbox,nodeIntegration:p.nodeIntegration,contextIsolation:p.contextIsolation};})()}));
+  const state=await app.evaluate(({app,BrowserWindow})=>({userData:app.getPath('userData'),packaged:app.isPackaged,version:app.getVersion(),preferences:(()=>{const p=BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences();return {sandbox:p.sandbox,nodeIntegration:p.nodeIntegration,contextIsolation:p.contextIsolation};})()}));
   assert.equal(state.packaged,true);assert.equal(state.version,pkg.version);checks.push('packaged-launch');
   assert.deepEqual(state.preferences,{sandbox:true,nodeIntegration:false,contextIsolation:true});assert.equal(await window.evaluate(()=>typeof window.require),'undefined');checks.push('isolated-renderer');
   await window.getByRole('textbox',{name:'이메일 또는 아이디'}).waitFor();assert.equal(new URL(window.url()).origin,'https://chat.damilab.cc');checks.push('production-login-screen');
+  assert.equal(await window.evaluate(()=>window.damiDesktop.version),2);
+  const updateState=await window.evaluate(()=>window.damiDesktop.getUpdateState());assert.equal(updateState.currentVersion,pkg.version);checks.push('updater-bridge');
+  const marker=join(state.userData,'native-update-preservation-test.json');await writeFile(marker,JSON.stringify({version:pkg.version,marker:'preserve-user-data'}));
   await window.screenshot({path:`desktop/release/native-${platform}-${arch}.png`});
   await app.close();app=null;
+  if(platform==='windows')run('powershell.exe',['-NoProfile','-NonInteractive','-File',resolve('desktop/test/windows-installer.ps1'),'-Executable',installer,'-InstallDirectory',installDirectory]);
+  else run('ditto',[join(mountDirectory,'DAMI Chat.app'),installDirectory]);
+  assert.equal(JSON.parse(await readFile(marker,'utf8')).marker,'preserve-user-data');await access(executable);checks.push('update-reinstall-preserves-settings');
   if(platform==='windows'){
     const uninstallers=(await readdir(installDirectory)).filter(n=>/^Uninstall.*\.exe$/.test(n));assert.equal(uninstallers.length,1);
     run('powershell.exe',['-NoProfile','-NonInteractive','-File',resolve('desktop/test/windows-installer.ps1'),'-Executable',join(installDirectory,uninstallers[0])]);

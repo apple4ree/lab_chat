@@ -1,7 +1,7 @@
 {
   "name": "dami-chat-desktop",
   "productName": "DAMI Chat",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "DAMI Lab desktop messenger",
   "author": "DAMI Lab",
@@ -14,9 +14,6 @@
     "dist:mac": "electron-builder --mac dmg --arm64 --x64 --publish never",
     "dist:mac:zip": "electron-builder --mac --dir --arm64 --x64 --publish never && python3 package-mac.py",
     "dist:win:zip": "electron-builder --win zip --x64 --publish never"
-  },
-  "dependencies": {
-    "electron-updater": "6.8.9"
   },
   "devDependencies": {
     "electron": "44.9.0",

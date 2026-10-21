@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {join} from 'node:path';
 import assert from 'node:assert/strict';
 export const desktopSources=['main.cjs','preload.cjs','policy.cjs','connection.cjs','notifications.cjs','updates.cjs','release-config.json','offline.html','offline.js'];
-const sharedChecks=['packaged-source-match','packaged-launch','isolated-renderer','production-login-screen'];
+const sharedChecks=['packaged-source-match','packaged-launch','isolated-renderer','production-login-screen','updater-bridge','update-reinstall-preserves-settings'];
 const targets=[
   {platform:'windows',arch:'x64',suffix:'win-x64.exe',checks:['installer-install','start-menu-shortcut','pe-x64','installer-uninstall']},
   {platform:'macos',arch:'arm64',suffix:'mac-arm64.dmg',checks:['dmg-verify','dmg-mount','applications-shortcut','application-copy','mach-o-architecture','framework-links','ad-hoc-signature']},

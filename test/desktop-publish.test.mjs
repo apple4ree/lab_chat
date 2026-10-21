@@ -12,7 +12,7 @@ async function fixture(){
  for(const [platform,arch] of [['windows','x64'],['macos','arm64'],['macos','x64']]){
   const windows=platform==='windows',name=`DAMI-Chat-${version}-${windows?'win':'mac'}-${arch}.${windows?'exe':'dmg'}`,bytes=Buffer.alloc(1024);
   if(windows){bytes.write('MZ');bytes.writeUInt32LE(64,60);bytes.write('PE\0\0',64,'ascii');}else bytes.write('koly',512,'ascii');
-  const checks=['packaged-source-match','packaged-launch','isolated-renderer','production-login-screen',...(windows?['installer-install','start-menu-shortcut','pe-x64','installer-uninstall']:['dmg-verify','dmg-mount','applications-shortcut','application-copy','mach-o-architecture','framework-links','ad-hoc-signature'])];
+  const checks=['packaged-source-match','packaged-launch','isolated-renderer','production-login-screen','updater-bridge','update-reinstall-preserves-settings',...(windows?['installer-install','start-menu-shortcut','pe-x64','installer-uninstall']:['dmg-verify','dmg-mount','applications-shortcut','application-copy','mach-o-architecture','framework-links','ad-hoc-signature'])];
   const report={schema:1,commit,version,name,platform,arch,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),sourceSha256,checks,developerSigned:false,notarized:false,signing:windows?'unsigned':'adhoc'};
   await writeFile(join(directory,name),bytes);await writeFile(join(directory,`build-info-${platform}-${arch}.json`),JSON.stringify(report));
  }

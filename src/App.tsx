@@ -6,6 +6,7 @@ import {GpuResources} from './GpuResources';
 import {Avatar,Dialog,Composer,MessageRow,Body} from './components';
 import {canMarkRead,clearDesktopSession,useDesktop} from './desktop';
 import {DesktopDownloads} from './DesktopDownloads';
+import {DesktopUpdateNotice} from './DesktopUpdateNotice';
 import {DomainSettings,DomainNotice} from './DomainSettings';
 import {useMessageArrival} from './motion';
 import {useSync,mergeMessages,type SyncBatch} from './sync';
@@ -105,6 +106,7 @@ function Workspace({me,config,onLogout}:{me:User;config:AuthConfig;onLogout:()=>
   async function startDm(user:User){try{const {id}=await post<{id:string}>('/dms',{userId:user.id});refresh();choose(id);}catch(e){handleError(e);}}
   const notifications=channels.reduce((n,c)=>n+c.mentions,0);
   return <div className="workspace">
+    <DesktopUpdateNotice onDownload={()=>setDialog('desktop')}/>
     <header className="topbar"><button className="brand brand-button" onClick={()=>channels[0]&&choose(channels[0].id)}><span className="brand-mark"><FlaskConical size={21}/></span>lab<span className="brand-light">chat</span></button><button className="global-search" onClick={()=>setDialog('search')}><Search size={17}/><span>대화, 파일, 연구 기록 검색</span><kbd>⌘ / Ctrl K</kbd></button><div className="topbar-right"><span className="workspace-tag">{config.mode==='demo'?'DEMO WORKSPACE':'RESEARCH WORKSPACE'}</span><button className="profile-top" aria-label="내 계정" onClick={()=>setDialog('profile')}><Avatar user={me} small/></button></div></header>
     <div className="workspace-body"><nav className="rail" aria-label="주 메뉴"><button className="rail-item active" aria-label="홈" onClick={()=>{setGpuOpen(false);setDialog(null);setMobileNav(true);}}><Home size={22}/><span>홈</span></button><button className="rail-item" aria-label="내 멘션" onClick={()=>setDialog('mentions')}><Bell size={22}/><span>멘션</span>{notifications>0&&<i>{notifications}</i>}</button><button className="rail-item" aria-label="검색" onClick={()=>setDialog('search')}><Search size={22}/><span>검색</span></button><button className={`rail-item ${gpuOpen?'active':''}`} aria-label="연구 자원" onClick={()=>{setGpuOpen(true);setThread(null);setMobileNav(false);}}><Cpu size={22}/><span>자원</span></button><div className="rail-spacer"/><button className="rail-item" aria-label="설정" onClick={()=>setDialog(me.role==='admin'?'admin':'profile')}><Settings size={22}/><span>설정</span></button></nav>
     {mobileNav&&<button className="sidebar-scrim" aria-label="채널 목록 닫기" onClick={()=>setMobileNav(false)}/>}
