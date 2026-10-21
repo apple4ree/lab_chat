@@ -2,6 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import {Cpu,RefreshCw,Bell,Menu,Server,Activity,Clock,AlertTriangle} from 'lucide-react';
 import {api,type User,type ResponseCache} from './api';
 import {ResourceHistory,ResourceAccounts} from './ResourceAnalytics';
+import {ServerResources} from './ServerResources';
 import {ResourceReservations} from './ResourceReservations';
 
 type Status='active'|'resident'|'idle'|'offline'|'unknown';
@@ -33,8 +34,8 @@ export function GpuResources({me,onChannel,onMenu,onError}:{me:User;onChannel:(i
     <div className="gpu-scroll">
       <div className="gpu-title"><div><span className="gpu-eyebrow">RESEARCH RESOURCES</span><h1>연구에 필요한 연산 자원</h1><p>장비의 마지막 관측값입니다. 미사용 표시는 예약이나 독점 사용 권한을 보장하지 않습니다.</p></div>{data?.channelId&&<button className="secondary" onClick={()=>onChannel(data.channelId!)}><Bell size={16}/>#gpu-자원 알림</button>}</div>
       {data?.demo&&<p className="info-banner">체험용 샘플 장비입니다. 실제 연구실 GPU나 작업 정보와 연결되지 않습니다.</p>}
-      <nav className="resource-tabs" aria-label="자원 관리 메뉴">{[['live','GPU 현황'],['history','사용 이력'],['reservations','예약·배정'],['accounts','AI 사용량·한도']].map(([key,label])=><button key={key} aria-current={tab===key?'page':undefined} onClick={()=>setTab(key)}>{label}</button>)}</nav>
-      {tab==='history'?<ResourceHistory/>:tab==='reservations'?<ResourceReservations me={me}/>:tab==='accounts'?<ResourceAccounts me={me}/>:<>
+      <nav className="resource-tabs" aria-label="자원 관리 메뉴">{[['servers','서버 사양'],['live','GPU 현황'],['history','사용 이력'],['reservations','예약·배정'],['accounts','AI 사용량·한도']].map(([key,label])=><button key={key} aria-current={tab===key?'page':undefined} onClick={()=>setTab(key)}>{label}</button>)}</nav>
+      {tab==='servers'?<ServerResources me={me} onChannel={onChannel}/>:tab==='history'?<ResourceHistory/>:tab==='reservations'?<ResourceReservations me={me}/>:tab==='accounts'?<ResourceAccounts me={me}/>:<>
       {error&&<p className="gpu-warning" role="alert"><AlertTriangle size={18}/>{error}</p>}
       {data&&!data.configured&&<div className="gpu-warning"><AlertTriangle size={18}/><span>아직 GPU 상태 서비스가 연결되지 않았습니다. 관리자에게 연결을 요청해 주세요.</span></div>}
       {data?.configured&&data.connection!=='ok'&&<div className="gpu-warning" role="status"><AlertTriangle size={18}/><span>{data.connection==='waiting'?'첫 GPU 상태를 기다리고 있습니다.':'GPU 상태 서비스와 연결이 끊겼습니다. 마지막 값을 현재 가용량으로 취급하지 마세요.'}</span></div>}

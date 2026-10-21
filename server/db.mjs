@@ -3,12 +3,13 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {installSyncSchema} from './sync.mjs';
+import {installServerSchema} from './server-schema.mjs';
 import {installGpuHistorySchema} from './gpu-history.mjs';
 
 export function openDatabase(directory) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(join(directory, 'lab-chat.sqlite'));
-  if(db.prepare('PRAGMA user_version').get().user_version>6){db.close();throw new Error('Database schema is newer than this application.');}
+  if(db.prepare('PRAGMA user_version').get().user_version>7){db.close();throw new Error('Database schema is newer than this application.');}
   db.exec(`
     PRAGMA journal_mode=WAL;
     PRAGMA foreign_keys=ON;
@@ -99,7 +100,7 @@ export function openDatabase(directory) {
       updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL REFERENCES users(id), version INTEGER NOT NULL DEFAULT 1
     );
   `);
-  transaction(db,()=>{installSyncSchema(db);installGpuHistorySchema(db);db.exec('PRAGMA user_version=6');});
+  transaction(db,()=>{installSyncSchema(db);installGpuHistorySchema(db);installServerSchema(db);db.exec('PRAGMA user_version=7');});
   return db;
 }
 

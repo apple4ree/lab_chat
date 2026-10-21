@@ -8,6 +8,7 @@ import { randomUUID, timingSafeEqual, createHash } from 'node:crypto';
 import { openDatabase, transaction, createUser, createChannel, publicUser, seedDemo } from './db.mjs';
 import { token, hashToken, hashPassword, verifyPassword, getSession, startSession, rateLimiter } from './auth.mjs';
 import {createDemoGate} from './demo-gate.mjs';
+import {createServerMonitor} from './servers.mjs';
 import {createGpuMonitor} from './gpu.mjs';
 import {createResources,mountResources} from './resources.mjs';
 import {createResourceSource} from './resource-source.mjs';
@@ -41,7 +42,7 @@ const integer=value=>{
 };
 const emojiSet=new Set(['👍','❤️','🎉','👀','🌱','✅']);
 
-export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',setupToken=token(),distDir=resolve('dist'),demoGateHash,gpuSource=null,gpuAutoStart=true,resourceSource=null,desktopReleaseDir=null,domainProbe}={}) {
+export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',setupToken=token(),distDir=resolve('dist'),demoGateHash,gpuSource=null,gpuAutoStart=true,resourceSource=null,desktopReleaseDir=null,domainProbe,serverSource=null,serverAnalyze=null}={}) {
   if (!dataDir) throw new Error('dataDir is required');
   if (!['local','demo'].includes(mode)) throw new Error('LAB_AUTH_MODE must be local or demo');
   const demoGate=mode==='demo'&&demoGateHash?createDemoGate(demoGateHash):null;
@@ -113,6 +114,7 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
 
   const gpuHistory=mode==='demo'?null:createGpuHistory({db});
   const gpu=createGpuMonitor({db,source:gpuSource,emit,history:gpuHistory,demo:mode==='demo',autoStart:gpuAutoStart});
+  const servers=createServerMonitor({db,gpu,source:serverSource,analyze:serverAnalyze,emit,audit,autoStart:gpuAutoStart&&(!!serverSource||!!gpuSource)});
   const sources=mode==='demo'?createResourceSource({demo:true}):localGpuResourceSource(gpuHistory,resourceSource||createResourceSource());
   const resources=createResources({db,gpu,emit,source:sources,autoStart:gpuAutoStart});
 
@@ -176,6 +178,9 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
     if(req.get('If-None-Match')===etag)return res.status(304).end();
     res.type('json').send(body);
   });
+  app.get('/api/resources/servers',(req,res)=>res.json(servers.view(req.user.id)));
+  app.get('/api/admin/server-managers',(req,res)=>{admin(req);res.json(servers.roleView());});
+  app.post('/api/admin/server-managers',(req,res)=>{admin(req);res.json(servers.setManager(req.user.id,req.body.userId,req.body.enabled));});
   mountResources(app,resources);
   mountDesktopReleases(app,desktopReleaseDir);
   app.get('/api/me',(req,res)=>res.json({...publicUser(req.user),email:req.user.email}));
@@ -265,6 +270,7 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   });
   app.post('/api/channels/:id/members',(req,res)=>{
     const c=channelFor(req,req.params.id);
+    if(c.id===servers.channelId())fail(403,'서버 관리자 역할 설정에서 구성원을 변경해 주세요.');
     if(c.kind!=='private'||(c.created_by!==req.user.id&&req.user.role!=='admin')) fail(403,'비공개 채널의 생성자 또는 관리자만 구성원을 추가할 수 있습니다.');
     const userId=string(req.body.userId,'구성원',100);
     if(!db.prepare('SELECT 1 FROM users WHERE id=?').get(userId)) fail(404,'구성원을 찾을 수 없습니다.');
@@ -436,5 +442,5 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   });
   const closeStreams=()=>{for(const c of clients)c.res.end();};
   let closed=false;
-  return {app,db,setupToken,gpu,resources,closeStreams,close:()=>{if(closed)return;closed=true;metrics.close();resources.stop();void gpu.stop();closeStreams();db.close();}};
+  return {app,db,setupToken,gpu,resources,servers,closeStreams,close:()=>{if(closed)return;closed=true;metrics.close();void servers.stop();resources.stop();void gpu.stop();closeStreams();db.close();}};
 }

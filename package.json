@@ -20,6 +20,7 @@
     "measure:network": "node scripts/measure-network.mjs"
   },
   "dependencies": {
+    "@openai/codex-sdk": "0.163.0",
     "express": "5.3.0",
     "helmet": "8.3.0",
     "lucide-react": "1.59.0",
