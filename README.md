@@ -4,13 +4,15 @@
 
 현재 연결 주소: **https://chat.damilab.cc** (일반), **https://chat-demo.damilab.cc** (체험). 접속 정보는 서버의 `.data/deploy/접속정보.txt`, 운영 방법과 공개 주소 검증은 [DEPLOYMENT.md](docs/DEPLOYMENT.md)에 있습니다. 현재 두 서비스는 PM2로 실행 중입니다. 아래 `npm start`는 별도 로컬 실행 안내이며, 운영 중인 포트에 중복 실행하지 않습니다.
 
-데스크톱 설치판: **[GitHub Release에서 다운로드](https://github.com/apple4ree/lab_chat/releases/tag/v0.1.2)** · [앱 안에서 다운로드](https://chat.damilab.cc/#desktop-downloads) · [빌드 및 검증 범위](docs/DESKTOP.md).
+데스크톱 설치판: **[GitHub Release에서 다운로드](https://github.com/apple4ree/lab_chat/releases/tag/v0.1.3)** · [앱 안에서 다운로드](https://chat.damilab.cc/#desktop-downloads) · [빌드 및 검증 범위](docs/DESKTOP.md).
 
 | 운영체제 | 설치 파일 |
 |---|---|
-| Windows 64비트 | [EXE 다운로드](https://github.com/apple4ree/lab_chat/releases/download/v0.1.2/DAMI-Chat-0.1.2-win-x64.exe) |
-| Mac Apple Silicon (M 시리즈) | [DMG 다운로드](https://github.com/apple4ree/lab_chat/releases/download/v0.1.2/DAMI-Chat-0.1.2-mac-arm64.dmg) |
-| Mac Intel | [DMG 다운로드](https://github.com/apple4ree/lab_chat/releases/download/v0.1.2/DAMI-Chat-0.1.2-mac-x64.dmg) |
+| Windows 64비트 | [EXE 다운로드](https://github.com/apple4ree/lab_chat/releases/download/v0.1.3/DAMI-Chat-0.1.3-win-x64.exe) |
+| Mac Apple Silicon (M 시리즈) | [DMG 다운로드](https://github.com/apple4ree/lab_chat/releases/download/v0.1.3/DAMI-Chat-0.1.3-mac-arm64.dmg) |
+| Mac Intel | [DMG 다운로드](https://github.com/apple4ree/lab_chat/releases/download/v0.1.3/DAMI-Chat-0.1.3-mac-x64.dmg) |
+
+v0.1.3부터 새 버전을 자동 확인하고 앱에서 다운로드·검증·설치 파일 열기를 지원합니다. 이전 설치자는 이번 한 번 새 설치 파일로 교체하세요. Windows는 설치 안내를 따르고, Mac은 DMG에서 Applications로 앱을 옮겨 교체합니다.
 
 Release의 **Assets**에서 위 설치 파일을 선택하세요. `Source code (zip)`은 설치 파일이 아닙니다. 다운로드에는 메신저 로그인이 필요 없으며, 앱 사용에는 연구실 계정이 필요합니다. 현재는 정식 개발자 서명·Apple 공증 전 시험판으로 운영체제에서 실행을 제한할 수 있습니다.
 

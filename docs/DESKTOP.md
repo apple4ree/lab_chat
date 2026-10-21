@@ -1,5 +1,7 @@
 # DAMI Chat 데스크톱 설치판 0.1.3
 
+배포: [v0.1.3 Release](https://github.com/apple4ree/lab_chat/releases/tag/v0.1.3), [세 플랫폼 네이티브 검증](https://github.com/apple4ree/lab_chat/actions/runs/39558835656). 설치 파일의 소스 커밋은 `ff5e614cf781181d99bed139bd1fc1b1a2da7701`입니다.
+
 Windows x64 설치용 EXE와 macOS 13 이상 Apple Silicon·Intel용 DMG를 제공합니다. 앱은 `https://chat.damilab.cc`에 연결해 웹과 같은 계정·대화·파일·GPU 자원을 사용합니다. DB나 관리자 계정은 설치 파일에 포함하지 않습니다.
 
 ## 설치
@@ -79,10 +81,22 @@ node scripts/publish-desktop.mjs .data/installer-builds/RUN_ID/verified SOURCE_C
 
 운영 다운로드 manifest의 `releaseUrl`을 `https://github.com/apple4ree/lab_chat/releases/tag/v0.1.1`로 설정했습니다. 서버는 이 저장소와 manifest 버전에 정확히 일치하는 주소만 허용하고 각 다운로드 URL을 같은 태그의 asset URL로 생성합니다. UI는 외부 브라우저로 열 수 있는 링크를 제공합니다. 기존 인증된 로컬 다운로드 경로는 열린 이전 클라이언트를 위해 유지합니다. `releaseUrl`이 없으면 기존 로컬 다운로드를 사용합니다.
 
-다음 버전은 네이티브 검증 → 빌드 커밋에 고정한 draft Release 업로드 → GitHub digest 대조 → Release 공개·익명 다운로드 검증 → manifest 연결 순서로 게시합니다. `scripts/publish-desktop.mjs`로 새 manifest를 만들면 GitHub 연결 필드는 별도로 설정해야 합니다. 검증 전에 링크를 활성화하거나 기존 태그·설치 파일을 덮어쓰지 않습니다.
+다음 버전은 네이티브 검증 → 빌드 커밋에 고정한 draft Release 업로드 → GitHub digest 대조 → Release 공개·익명 다운로드 검증 → manifest 연결 순서로 게시합니다. v0.1.3부터 `scripts/publish-desktop.mjs`가 게시된 GitHub 파일을 검증하고 연결 URL도 함께 기록합니다. 검증 전에 링크를 활성화하거나 기존 태그·설치 파일을 덮어쓰지 않습니다.
 
 공개 GitHub에서 페이지 200, 세 설치 파일의 Range 206·원본 바이트 일치, 체크섬 파일 전체 일치를 확인했습니다. 로컬 다운로드 API 회귀 3개, 브라우저 다운로드 시나리오 3개, TypeScript·Vite 빌드·용량 검사 통과. 운영·체험 배포 결과는 [DEPLOYMENT.md](DEPLOYMENT.md)에 기록합니다.
 
 ## v0.1.2 도메인 변경 지원
 
 관리자가 대표 도메인을 바꾸면 시작 시 새 주소를 확인·저장하고, 실행 중에는 사용자 확인 후 이동합니다. 쿠키를 새 도메인에 복사하지 않습니다. 최초 주소는 `release-config.json`에, 검증된 변경 주소는 사용자 데이터 폴더의 `desktop-settings.json`에 저장합니다. URL을 환경 변수로 바꾸는 기능은 개발 실행에서만 허용합니다. [도메인 이전 절차](DOMAINS.md)를 따르세요.
+
+## v0.1.3 검증·게시 기록 (2026-10-21)
+
+Windows x64, macOS arm64/x64 세 CI 작업이 모두 성공했습니다. 설치·실행·패키지 소스 일치·업데이트 IPC·동일 설치 파일 재설치 후 사용자 데이터 표식 보존을 확인했습니다. 별도 버전 간 무인 자동 교체나 사용자 기기의 SmartScreen/Gatekeeper 통과를 입증한 검사는 아닙니다. Windows는 10항목, Mac은 각 13항목을 완료했으며 빌드 보고서 JSON을 Release에 함께 게시했습니다.
+
+서버 테스트 50개, 데스크톱 테스트 11개, 업데이트 브라우저 테스트 2개, Linux Electron 실행 검증 8항목이 통과했습니다. 실제 공개 업데이트 피드에서 세 OS/아키텍처의 파일 선택을 확인했고, 프로덕션 업데이터 코드로 Windows 설치 파일 111,654,995바이트를 GitHub에서 받아 전체 SHA-256 검증을 통과했습니다(10.1초, Linux 호스트에서는 설치 파일을 실행하지 않음). 게시된 세 파일의 GitHub digest도 CI 아티팩트와 일치했습니다.
+
+설치 파일 크기는 Windows 111,654,995바이트(-319,325), Mac arm64 128,174,347바이트(-472,692), Mac x64 133,750,160바이트(-442,844)입니다. electron-updater 및 불필요해진 의존성 5개를 제거했습니다. 웹 초기 자산은 gzip JS 97,779바이트·CSS 9,447바이트로 예산 이내입니다. 설치 파일 다운로드 검증에 사용한 임시 사본은 검증 후 제거했습니다.
+
+배포 전 백업: `.data/desktop-update-backup/2026-10-21T06-59-13.720Z/`. 운영·체험 DB의 기존 사용자·로그인명·채널·멤버십·메시지·첨부·예약·처리 이력·잔액을 보존했고 무결성은 `ok`였습니다. 공개 HTML 일치, 업데이트 피드 200/no-store, 기존 비로그인 설치 파일 API 401을 확인했습니다. 증거는 `.data/deploy/evidence/desktop-updater-{before,server,public-download}.json` 및 `desktop-v0.1.3-installers.json`입니다.
+
+다음 배포에서는 GitHub Release를 먼저 게시한 뒤 `node scripts/publish-desktop.mjs <아티팩트 폴더> <빌드 커밋>`을 실행합니다. 스크립트가 실제 게시된 태그의 커밋과 세 설치 파일의 크기·해시를 검증한 후, GitHub URL을 포함한 서버 manifest를 원자적으로 교체합니다. 검증 실패 시 기존 다운로드·업데이트 버전을 유지합니다. 파일 복사는 지원되는 파일시스템에서 copy-on-write를 요청합니다.
