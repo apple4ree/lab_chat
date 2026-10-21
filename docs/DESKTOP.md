@@ -61,3 +61,14 @@ node scripts/publish-desktop.mjs .data/installer-builds/RUN_ID/verified SOURCE_C
 검증 경계: GitHub의 Windows Server/macOS 실행 환경 검증이며, 사용자의 실제 Windows 10/11·Mac에서의 수동 설치 테스트, SmartScreen/Gatekeeper 통과, 실제 OS 알림·시작 프로그램 동작·업데이트 다운로드 검증을 대체하지 않습니다. 정식 개발자 서명·Apple 공증과 자동 업데이트는 별도 작업입니다. 이번 실행의 성공 여부와 증거 경로는 DEPLOYMENT.md에 기록합니다.
 
 이전 0.1.0의 Linux Xvfb 테스트에서는 격리 DB/프로필로 미읽음·배지, 채널 이동, GPU 화면, 로그인 유지, 로그아웃, 오프라인 화면을 검증했습니다. 해당 컨테이너 실행에만 `--no-sandbox`를 사용했으며 배포 앱은 이 플래그를 사용하지 않습니다. 이전 기록은 `.data/deploy/evidence/desktop-smoke.json`입니다.
+# GitHub Release 다운로드 — 2026-10-21
+
+[DAMI Chat v0.1.1 시험판](https://github.com/apple4ree/lab_chat/releases/tag/v0.1.1)의 Assets에 Windows x64 EXE, macOS arm64·x64 DMG와 `SHA256SUMS.txt`를 게시했습니다. `Source code (zip/tar.gz)`은 GitHub가 제공하는 소스 코드이며 설치 파일이 아닙니다. 파일 다운로드는 공개이고 앱 사용에는 연구실 로그인이 필요합니다.
+
+태그 `v0.1.1`은 네이티브 설치 파일을 만든 커밋 `9db04b1e0804e5c2c8d55a9079f112a9c3b4d64f`을 가리킵니다. 기존 CI 검증 파일을 재사용했고 세 파일의 전체 로컬 SHA-256과 GitHub asset digest가 일치했습니다. 이 배포는 파일 게시 경로 변경이며 설치 프로그램 재빌드·정식 서명·Apple 공증·자동 업데이트 추가는 아닙니다. 웹 기능은 운영 서버의 최신 화면을 사용합니다.
+
+운영 다운로드 manifest의 `releaseUrl`을 `https://github.com/apple4ree/lab_chat/releases/tag/v0.1.1`로 설정했습니다. 서버는 이 저장소와 manifest 버전에 정확히 일치하는 주소만 허용하고 각 다운로드 URL을 같은 태그의 asset URL로 생성합니다. UI는 외부 브라우저로 열 수 있는 링크를 제공합니다. 기존 인증된 로컬 다운로드 경로는 열린 이전 클라이언트를 위해 유지합니다. `releaseUrl`이 없으면 기존 로컬 다운로드를 사용합니다.
+
+다음 버전은 네이티브 검증 → 빌드 커밋에 고정한 draft Release 업로드 → GitHub digest 대조 → Release 공개·익명 다운로드 검증 → manifest 연결 순서로 게시합니다. `scripts/publish-desktop.mjs`로 새 manifest를 만들면 GitHub 연결 필드는 별도로 설정해야 합니다. 검증 전에 링크를 활성화하거나 기존 태그·설치 파일을 덮어쓰지 않습니다.
+
+공개 GitHub에서 페이지 200, 세 설치 파일의 Range 206·원본 바이트 일치, 체크섬 파일 전체 일치를 확인했습니다. 로컬 다운로드 API 회귀 3개, 브라우저 다운로드 시나리오 3개, TypeScript·Vite 빌드·용량 검사 통과. 운영·체험 배포 결과는 [DEPLOYMENT.md](DEPLOYMENT.md)에 기록합니다.

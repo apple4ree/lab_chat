@@ -125,3 +125,11 @@ EXE 한 개·DMG 두 개의 다운로드 UI와 Range 206, 로컬 파일 바이�
 증거: `.data/deploy/evidence/network-{before,data,public}.json`, `network-installers-public.json`. 설치 파일 보관 사본의 블록 공유 증거는 `.data/research/network-2026-10-20/installer-dedupe.json`입니다. 파일 경로·내용·inode·수정 시각을 유지하며 749,632,411 B의 동일 영역을 공유했고 게시 설치 파일·DB·백업은 대상에서 제외했습니다.
 
 스키마 5를 도입했으므로 이전 스키마까지만 지원하는 서버 코드로 단순 재시작하는 롤백은 거부됩니다. 장애 시 현재 DB를 별도로 보존하고 새 위치에 백업을 복구해 검증한 후 전환해야 합니다. 배포 후 기록을 잃을 수 있는 운영 DB 덮어쓰기는 자동화하지 않았습니다.
+
+## 2026-10-21 — GitHub Release 다운로드 연결
+
+[v0.1.1 시험판 Release](https://github.com/apple4ree/lab_chat/releases/tag/v0.1.1)에 기존 검증된 EXE·DMG 3개와 SHA256SUMS.txt를 게시했습니다. 태그는 설치 파일의 실제 빌드 커밋 9db04b1e0804e5c2c8d55a9079f112a9c3b4d64f에 고정했습니다. GitHub asset digest와 로컬 전체 SHA-256을 대조한 뒤 공개했고, 익명 페이지 200·세 파일 Range 206·원본 바이트 및 체크섬 파일 일치를 확인했습니다.
+
+운영·체험 다운로드 manifest와 화면을 연결하고 lab-chat·lab-chat-demo만 재시작했습니다. GitHub Release 링크와 설치 파일 링크, GitHub 파일의 Range 206·DMG 푸터, 로그아웃 후 기존 로컬 API의 401, 브라우저 예외 0건을 두 도메인에서 확인했습니다. GitHub 설치 파일은 공개 다운로드이며 메신저의 대화·첨부파일·계정 권한은 변경하지 않았습니다.
+
+백업은 `.data/github-release-backup/2026-10-21T01-20-08.996Z/`이며 기존 index·manifest·온라인 DB·첨부파일을 포함합니다. 배포 후 계정·메시지 내용 해시 일치와 DB 무결성 ok를 확인했습니다. 증거는 `.data/github-release-0.1.1/`과 `.data/deploy/evidence/github-release-public.json`에 있습니다. 새 설치 파일 사본이나 의존성은 만들지 않았고, 현재 JS gzip은 95,601 B로 용량 예산을 통과했습니다.

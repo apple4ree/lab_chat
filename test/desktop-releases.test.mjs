@@ -20,6 +20,14 @@ for(const extension of ['zip','exe','dmg'])test(`desktop ${extension} downloads 
     const range=await fetch(base+listing.files[0].url,{headers:{...headers,Range:'bytes=0-3'}});assert.equal(range.status,206);assert.deepEqual(Buffer.from(await range.arrayBuffer()),bytes.subarray(0,4));
     assert.equal((await fetch(base+'/api/desktop/releases/manifest.json',{headers})).status,404);
     assert.equal((await fetch(base+'/api/desktop/releases/%2e%2e%2fpackage.json',{headers})).status,404);
+    manifest.releaseUrl='https://github.com/apple4ree/lab_chat/releases/tag/v0.1.0';writeFileSync(join(release,'manifest.json'),JSON.stringify(manifest));
+    const github=await(await fetch(base+'/api/desktop/releases',{headers})).json();
+    assert.equal(github.releaseUrl,manifest.releaseUrl);
+    assert.equal(github.files[0].url,`https://github.com/apple4ree/lab_chat/releases/download/v0.1.0/${name}`);
+    assert.equal((await fetch(base+'/api/desktop/releases/'+name,{headers})).status,200);
+    manifest.releaseUrl='https://example.invalid/releases/tag/v0.1.0';writeFileSync(join(release,'manifest.json'),JSON.stringify(manifest));
+    assert.equal((await fetch(base+'/api/desktop/releases',{headers})).status,500);
+    delete manifest.releaseUrl;writeFileSync(join(release,'manifest.json'),JSON.stringify(manifest));
     rmSync(join(release,name));writeFileSync(join(dir,'private'),bytes);symlinkSync(join(dir,'private'),join(release,name));
     const denied=await fetch(base+'/api/desktop/releases/'+name,{headers});assert.equal(denied.status,500);assert.ok(!(await denied.text()).includes('fixture installer'));
   }finally{service.close();server.closeAllConnections();await new Promise(r=>server.close(r));rmSync(dir,{recursive:true,force:true});}
