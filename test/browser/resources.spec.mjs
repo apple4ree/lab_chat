@@ -56,7 +56,8 @@ test('members request reservations; admins review, approve, assign, and record a
 
 test('AI account data labels stale quotas, filters costs, and persists admin manual balance records',async({page})=>{
   await open(page);await page.getByRole('button',{name:'AI 사용량·한도',exact:true}).click();
-  await expect(page.getByText('보고 지연 · 현재 한도 확인 불가',{exact:true})).toBeVisible();await expect(page.getByText('5시간: 32% 사용 · 68% 남음',{exact:true})).toBeVisible();
+  await expect(page.getByText('보고 지연 · 현재 한도 확인 불가',{exact:true})).toBeVisible();await expect(page.getByText('주간: 54% 사용 · 46% 남음',{exact:true})).toBeVisible();
+  await expect(page.locator('.resource-quota').filter({has:page.getByRole('heading',{name:/^codex /})}).getByText(/^5시간:/)).toHaveCount(0);await expect(page.locator('.resource-quota').filter({has:page.getByRole('heading',{name:/^claude /})}).getByText('5시간: 확인 불가',{exact:true})).toBeVisible();
   await page.getByLabel('공급자',{exact:true}).selectOption('google');await expect(page.getByText('선택한 기간·공급자의 집계 데이터가 없습니다.',{exact:true})).toBeVisible();
   await page.getByLabel('공급자',{exact:true}).selectOption('openai');await expect(page.getByRole('cell',{name:'sample-model-a',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'잔액 기록 수정 · openai',exact:true}).click();await page.getByLabel('잔액',{exact:true}).fill('123.45');await page.getByRole('button',{name:'잔액 저장',exact:true}).click();await expect(page.getByText('메신저 기록: 123.45 USD',{exact:false})).toBeVisible();
@@ -69,7 +70,7 @@ test('all resource views and reservation form fit mobile width without exposing 
     await page.getByRole('button',{name:tab,exact:true}).click();
     if(tab==='사용 이력')await expect(page.locator('.resource-chart path')).toHaveCount(3);
     if(tab==='예약·배정'){await page.getByRole('button',{name:'예약 신청',exact:true}).click();await expect(page.getByRole('form',{name:'예약 신청서'})).toBeVisible();}
-    if(tab==='AI 사용량·한도'){await expect(page.getByText('5시간: 32% 사용 · 68% 남음',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:/잔액 기록 수정/})).toHaveCount(0);}
+    if(tab==='AI 사용량·한도'){await expect(page.getByText('주간: 54% 사용 · 46% 남음',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:/잔액 기록 수정/})).toHaveCount(0);}
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   }
   await page.screenshot({path:'docs/screenshots/resource-mobile.png',fullPage:true});
