@@ -1,10 +1,16 @@
 const {URL}=require('node:url');
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+function migratedOrigin(raw){
+  if(typeof raw!=='string'||raw.length>253||/[\s\\]/.test(raw))throw new Error('Invalid workspace origin');
+  const u=new URL(raw);
+  if(u.protocol!=='https:'||u.origin!==raw||u.port||u.username||u.password||!u.hostname.includes('.')||/^[\d.]+$/.test(u.hostname)||!u.hostname.split('.').every(x=>/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(x)))throw new Error('Invalid workspace origin');
+  return u.origin;
+}
 function workspaceURL(release,{packaged=true,developmentUrl}={}){
   const raw=!packaged&&developmentUrl?developmentUrl:release.workspaceUrl;
   const u=new URL(raw);
   const development=!packaged&&u.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(u.hostname);
-  if(!development&&u.href!=='https://chat.damilab.cc/')throw new Error('Untrusted workspace URL');
+  if(!development)migratedOrigin(u.origin);
   if(u.username||u.password||u.pathname!=='/'||u.search||u.hash)throw new Error('Invalid workspace URL');
   return u.origin;
 }
@@ -21,4 +27,4 @@ function parseState(input){
   });
   return {userId:input.userId,activeChannelId:input.activeChannelId,channels};
 }
-module.exports={workspaceURL,sameOrigin,externalURL,parseState,uuid};
+module.exports={workspaceURL,sameOrigin,externalURL,parseState,uuid,migratedOrigin};

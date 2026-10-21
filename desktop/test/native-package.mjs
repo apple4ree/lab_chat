@@ -18,7 +18,7 @@ if(process.env.GITHUB_REF?.startsWith('refs/tags/'))assert.equal(process.env.GIT
 const name=`DAMI-Chat-${pkg.version}-${platform==='windows'?'win':'mac'}-${arch}.${platform==='windows'?'exe':'dmg'}`;
 const installer=resolve('desktop/release',name),temp=await mkdtemp(join(tmpdir(),'dami-native-'));
 const checks=[];let app,mounted=false,executable,archive,installDirectory,mountDirectory;
-const sources=['main.cjs','preload.cjs','policy.cjs','notifications.cjs','updates.cjs','release-config.json','offline.html','offline.js'];
+import {desktopSources as sources} from '../../scripts/desktop-release.mjs';
 async function sha256(path){const h=createHash('sha256');for await(const b of createReadStream(path))h.update(b);return h.digest('hex');}
 const run=(command,args)=>execFileSync(command,args,{encoding:'utf8',timeout:180000,stdio:['ignore','pipe','pipe']});
 async function exists(path){try{await access(path);return true;}catch{return false;}}

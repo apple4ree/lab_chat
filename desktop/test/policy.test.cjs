@@ -4,11 +4,12 @@ const {workspaceURL,sameOrigin,externalURL,parseState}=require('../policy.cjs');
 const {createTracker}=require('../notifications.cjs');
 const user='11111111-1111-4111-8111-111111111111',other='22222222-2222-4222-8222-222222222222',channel='33333333-3333-4333-8333-333333333333';
 const state=(id,unread=1,userId=user)=>parseState({userId,activeChannelId:channel,channels:[{id:channel,unread,mentions:0,latestMessageId:id}]});
-test('packaged workspace cannot be redirected by environment, credentials or hostname lookalikes',()=>{
+test('packaged bootstrap follows the bundled HTTPS config and ignores environment overrides',()=>{
   const config={workspaceUrl:'https://chat.damilab.cc'};
   assert.equal(workspaceURL(config,{developmentUrl:'http://evil.test'}),'https://chat.damilab.cc');
+  assert.equal(workspaceURL({workspaceUrl:'https://new.example.org'}),'https://new.example.org');
   assert.equal(workspaceURL(config,{packaged:false,developmentUrl:'http://127.0.0.1:4311'}),'http://127.0.0.1:4311');
-  for(const url of ['http://chat.damilab.cc','https://chat.damilab.cc.evil.test','https://u:p@chat.damilab.cc','https://chat.damilab.cc/?token=x'])assert.throws(()=>workspaceURL({workspaceUrl:url}));
+  for(const url of ['http://chat.damilab.cc','https://127.0.0.1','https://u:p@chat.damilab.cc','https://chat.damilab.cc/?token=x'])assert.throws(()=>workspaceURL({workspaceUrl:url}));
   assert.equal(sameOrigin('https://chat.damilab.cc/api/files/a','https://chat.damilab.cc'),true);
   assert.equal(sameOrigin('https://chat.damilab.cc@evil.test','https://chat.damilab.cc'),false);
 });

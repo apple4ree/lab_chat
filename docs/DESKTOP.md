@@ -16,7 +16,7 @@ Windows x64 설치용 EXE와 macOS 13 이상 Apple Silicon·Intel용 DMG를 제�
 - 창을 닫아도 계속 실행 옵션을 켜면 연결이 이어집니다. 완전히 종료하거나 컴퓨터가 절전 상태이면 알림을 받지 않습니다. 서버 연결이 필요하며 오프라인 작성·동기화 기능은 없습니다.
 - 네이티브 창이 보이고 포커스를 가진 상태에서만 읽음 처리를 수행합니다. 알림에는 메시지 본문을 넣지 않으며 기존 메시지·재연결 알림 중복을 억제합니다.
 
-Electron은 Node 접근을 허용하지 않는 sandbox/contextIsolation 렌더러를 사용합니다. IPC의 주 프레임·출처·입력을 검사하고 내부 탐색은 고정 워크스페이스로 제한합니다. 서버의 인증·채널 권한 검사도 유지합니다. 참고: [Electron 보안 지침](https://www.electronjs.org/docs/latest/tutorial/security/).
+Electron은 Node 접근을 허용하지 않는 sandbox/contextIsolation 렌더러를 사용합니다. IPC의 주 프레임·출처·입력을 검사하고 내부 탐색은 현재 신뢰하는 워크스페이스로 제한합니다. 관리자에게 승인된 도메인 변경은 기존 서버와 목적지의 일치 확인을 거쳐 메인 프로세스에서 반영합니다. 서버의 인증·채널 권한 검사도 유지합니다. 참고: [Electron 보안 지침](https://www.electronjs.org/docs/latest/tutorial/security/).
 
 ## 네이티브 빌드
 
@@ -72,3 +72,7 @@ node scripts/publish-desktop.mjs .data/installer-builds/RUN_ID/verified SOURCE_C
 다음 버전은 네이티브 검증 → 빌드 커밋에 고정한 draft Release 업로드 → GitHub digest 대조 → Release 공개·익명 다운로드 검증 → manifest 연결 순서로 게시합니다. `scripts/publish-desktop.mjs`로 새 manifest를 만들면 GitHub 연결 필드는 별도로 설정해야 합니다. 검증 전에 링크를 활성화하거나 기존 태그·설치 파일을 덮어쓰지 않습니다.
 
 공개 GitHub에서 페이지 200, 세 설치 파일의 Range 206·원본 바이트 일치, 체크섬 파일 전체 일치를 확인했습니다. 로컬 다운로드 API 회귀 3개, 브라우저 다운로드 시나리오 3개, TypeScript·Vite 빌드·용량 검사 통과. 운영·체험 배포 결과는 [DEPLOYMENT.md](DEPLOYMENT.md)에 기록합니다.
+
+## v0.1.2 도메인 변경 지원
+
+관리자가 대표 도메인을 바꾸면 시작 시 새 주소를 확인·저장하고, 실행 중에는 사용자 확인 후 이동합니다. 쿠키를 새 도메인에 복사하지 않습니다. 최초 주소는 `release-config.json`에, 검증된 변경 주소는 사용자 데이터 폴더의 `desktop-settings.json`에 저장합니다. URL을 환경 변수로 바꾸는 기능은 개발 실행에서만 허용합니다. [도메인 이전 절차](DOMAINS.md)를 따르세요.

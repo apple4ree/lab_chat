@@ -6,16 +6,17 @@ const release=require('./release-config.json');
 const {workspaceURL,sameOrigin,externalURL,parseState}=require('./policy.cjs');
 const {createTracker}=require('./notifications.cjs');
 const {installUpdates}=require('./updates.cjs');
+const {discoverConnection,savedConnection}=require('./connection.cjs');
 
 app.setName('DAMI Chat');app.setAppUserModelId('cc.damilab.chat');app.enableSandbox();
 if(!app.isPackaged&&process.env.LAB_DESKTOP_USER_DATA)app.setPath('userData',resolve(process.env.LAB_DESKTOP_USER_DATA));
-const origin=workspaceURL(release,{packaged:app.isPackaged,developmentUrl:process.env.LAB_DESKTOP_URL});
+let origin=workspaceURL(release,{packaged:app.isPackaged,developmentUrl:process.env.LAB_DESKTOP_URL});
 const offline=pathToFileURL(join(__dirname,'offline.html')).href;
 let win,tray,quitting=false,settings,unread=0,checkUpdates,pendingChannel=null;
 const tracker=createTracker(),notifications=new Set();
 const defaults={notifications:true,background:true,width:1280,height:860};
 const settingsFile=join(app.getPath('userData'),'desktop-settings.json');
-function loadSettings(){try{const s=JSON.parse(readFileSync(settingsFile,'utf8'));return {notifications:typeof s.notifications==='boolean'?s.notifications:true,background:typeof s.background==='boolean'?s.background:true,width:Number.isInteger(s.width)?Math.max(800,Math.min(2560,s.width)):1280,height:Number.isInteger(s.height)?Math.max(600,Math.min(1600,s.height)):860};}catch{return {...defaults};}}
+function loadSettings(){try{const s=JSON.parse(readFileSync(settingsFile,'utf8'));return {connection:savedConnection(s.connection),notifications:typeof s.notifications==='boolean'?s.notifications:true,background:typeof s.background==='boolean'?s.background:true,width:Number.isInteger(s.width)?Math.max(800,Math.min(2560,s.width)):1280,height:Number.isInteger(s.height)?Math.max(600,Math.min(1600,s.height)):860};}catch{return {...defaults};}}
 function saveSettings(){mkdirSync(app.getPath('userData'),{recursive:true});writeFileSync(settingsFile+'.tmp',JSON.stringify(settings),{mode:0o600});renameSync(settingsFile+'.tmp',settingsFile);}
 function trusted(event,allowOffline=false){
   if(!win||win.isDestroyed()||event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)return false;
@@ -45,7 +46,24 @@ function menu(){
     {label:'보기',submenu:[{label:'다시 연결',accelerator:'CmdOrCtrl+R',click:()=>void loadWorkspace()},{role:'resetZoom'},{role:'zoomIn'},{role:'zoomOut'},{role:'togglefullscreen'},...(!app.isPackaged?[{role:'toggleDevTools'}]:[])]},
     {label:'창',submenu:[{role:'minimize'},{role:'close'}]}]));
 }
-async function loadWorkspace(){try{await win.loadURL(origin);}catch{if(!quitting&&!win.isDestroyed())await win.loadURL(offline).catch(()=>{});}}
+let connecting=false;
+async function loadWorkspace({ask=false}={}){
+  if(connecting)return false;connecting=true;
+  const previous=origin;let navigationStarted=false;
+  try{
+    let next;
+    try{next=await discoverConnection(origin,settings.connection||{});}catch(error){if(ask)throw error;}
+    if(ask&&(!next||next.origin===origin))return false;
+    if(ask){const answer=await dialog.showMessageBox(win,{type:'question',buttons:['새 주소로 연결','취소'],defaultId:1,cancelId:1,message:'관리자가 변경한 주소로 연결할까요?',detail:`${origin}\n→ ${next.origin}\n\n전송하지 않은 메시지는 먼저 보내거나 복사해 주세요. 새 주소에서는 다시 로그인합니다.`});if(answer.response!==0)return false;}
+    if(next)origin=next.origin;
+    navigationStarted=true;
+    try{await win.loadURL(origin);}catch(error){origin=previous;throw error;}
+    if(next){settings.connection=next;saveSettings();}return true;
+  }catch(error){
+    if((!ask||navigationStarted)&&!quitting&&!win.isDestroyed())await win.loadURL(ask?origin:offline).catch(()=>{});
+    if(ask)throw error;return false;
+  }finally{connecting=false;}
+}
 async function openExternal(raw){const url=externalURL(raw);if(!url)return;try{await shell.openExternal(url);}catch{await dialog.showMessageBox(win,{message:'링크를 열지 못했습니다.'});}}
 
 if(!app.requestSingleInstanceLock()){app.quit();}else{
@@ -53,7 +71,9 @@ if(!app.requestSingleInstanceLock()){app.quit();}else{
   app.on('before-quit',()=>{quitting=true;clearNotifications();});
   app.on('window-all-closed',()=>app.quit());
   app.whenReady().then(()=>{
-    settings=loadSettings();const display=screen.getPrimaryDisplay().workAreaSize;
+    settings=loadSettings();
+    if(settings.connection&&!( !app.isPackaged&&process.env.LAB_DESKTOP_URL))origin=settings.connection.origin;
+    const display=screen.getPrimaryDisplay().workAreaSize;
     const sess=session.fromPartition('persist:dami-workspace');
     sess.setPermissionRequestHandler((wc,p,callback,details)=>callback(Boolean(wc&&sameOrigin(wc.getURL(),origin)&&sameOrigin(details.requestingUrl,origin)&&p==='clipboard-sanitized-write')));
     sess.setPermissionCheckHandler((wc,p,requestOrigin)=>Boolean(wc&&sameOrigin(wc.getURL(),origin)&&sameOrigin(requestOrigin,origin)&&p==='clipboard-sanitized-write'));
@@ -78,6 +98,7 @@ if(!app.requestSingleInstanceLock()){app.quit();}else{
       item.setSaveDialogOptions({defaultPath:join(app.getPath('downloads'),basename(item.getFilename()).replace(/[\\/:*?"<>|]/g,'_'))});
     });
     ipcMain.handle('dami:retry',event=>{if(!trusted(event,true))throw new Error('Untrusted sender');void loadWorkspace();return true;});
+    ipcMain.handle('dami:change-workspace',event=>{if(!trusted(event))throw new Error('Untrusted sender');return loadWorkspace({ask:true});});
     ipcMain.handle('dami:active',event=>{if(!trusted(event))throw new Error('Untrusted sender');return win.isVisible()&&win.isFocused()&&!win.isMinimized();});
     ipcMain.handle('dami:state',(event,input)=>{
       if(!trusted(event))throw new Error('Untrusted sender');const state=parseState(input);

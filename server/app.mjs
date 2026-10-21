@@ -13,6 +13,7 @@ import {createResourceSource} from './resource-source.mjs';
 import {mountDesktopReleases} from './desktop-releases.mjs';
 import {createSync,streamWriter} from './sync.mjs';
 import {createMetrics} from './metrics.mjs';
+import {createDomains} from './domains.mjs';
 
 class HttpError extends Error { constructor(status,message) { super(message); this.status=status; } }
 const fail=(status,message)=>{ throw new HttpError(status,message); };
@@ -36,7 +37,7 @@ const integer=value=>{
 };
 const emojiSet=new Set(['👍','❤️','🎉','👀','🌱','✅']);
 
-export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',setupToken=token(),distDir=resolve('dist'),demoGateHash,gpuSource=null,gpuAutoStart=true,resourceSource=null,desktopReleaseDir=null}={}) {
+export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',setupToken=token(),distDir=resolve('dist'),demoGateHash,gpuSource=null,gpuAutoStart=true,resourceSource=null,desktopReleaseDir=null,domainProbe}={}) {
   if (!dataDir) throw new Error('dataDir is required');
   if (!['local','demo'].includes(mode)) throw new Error('LAB_AUTH_MODE must be local or demo');
   const demoGate=mode==='demo'&&demoGateHash?createDemoGate(demoGateHash):null;
@@ -51,6 +52,8 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   if (mode==='demo') seedDemo(db);
   const app=express(), clients=new Set(), secure=origin.startsWith('https://'), sync=createSync(db);
   const metrics=createMetrics();
+  const audit=(actor,action,target=null)=>db.prepare('INSERT INTO audit_log (actor_id,action,target_id) VALUES (?,?,?)').run(actor,action,target);
+  const domains=createDomains({db,origin,mode,probe:domainProbe,audit});
   app.disable('x-powered-by');
   app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'","'unsafe-inline'"],imgSrc:["'self'",'data:'],connectSrc:["'self'"],upgradeInsecureRequests:secure?[]:null}},strictTransportSecurity:secure?undefined:false}));
   if(demoGate)app.use(demoGate);
@@ -58,7 +61,7 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   app.use('/api',(req,res,next)=>{
     res.set('Cache-Control','no-store');
     if (!['GET','HEAD','OPTIONS'].includes(req.method)) {
-      if (req.get('X-Lab-Request')!=='1' || (req.get('Origin') && req.get('Origin')!==origin)) return res.status(403).json({error:'요청 출처를 확인할 수 없습니다. 페이지를 새로고침해 주세요.'});
+      if (req.get('X-Lab-Request')!=='1' || (req.get('Origin') && !domains.accepts(req.get('Origin')))) return res.status(403).json({error:'요청 출처를 확인할 수 없습니다. 페이지를 새로고침해 주세요.'});
     }
     next();
   });
@@ -68,7 +71,6 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
     req.body??={};next();
   });
   const authLimit=rateLimiter();
-  const audit=(actor,action,target=null)=>db.prepare('INSERT INTO audit_log (actor_id,action,target_id) VALUES (?,?,?)').run(actor,action,target);
   const requireAuth=(req,res,next)=>{
     req.user=getSession(db,req);
     if (!req.user) return res.status(401).json({error:'로그인이 필요합니다.'});
@@ -109,6 +111,7 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
   const resources=createResources({db,gpu,emit,source:mode==='demo'?createResourceSource({demo:true}):resourceSource||createResourceSource(),autoStart:gpuAutoStart});
 
   app.get('/api/health',(_req,res)=>res.json({ok:true,version:'0.1.0'}));
+  app.get('/api/workspace/connection',(_req,res)=>res.json(domains.connection()));
   app.get('/api/auth/config',(_req,res)=>res.json({mode,needsSetup:mode==='local'&&!db.prepare('SELECT 1 FROM users LIMIT 1').get(),demoUsers:mode==='demo'?db.prepare("SELECT id,name,handle,role FROM users WHERE identity_provider='demo'").all():[]}));
   app.post('/api/auth/setup',authLimit,async(req,res)=>{
     if(mode!=='local') fail(404,'사용할 수 없습니다.');
@@ -157,6 +160,7 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
     startSession(db,res,user,secure);emit();res.status(201).json(publicUser(user));
   });
   app.use('/api',requireAuth);
+  domains.mount(app,admin);
   app.get('/api/admin/metrics',(req,res)=>{admin(req);res.json({...metrics.snapshot(),streams:{active:clients.size,bufferedBytes:[...clients].reduce((sum,c)=>sum+c.res.writableLength,0)},sync:{retainedChanges:db.prepare('SELECT count(*) n FROM sync_changes').get().n}});});
   app.get('/api/resources/gpus',(req,res)=>{
     // Validate the full view, including freshness/connection metadata. The client
@@ -192,7 +196,7 @@ export function createApp({dataDir,origin='http://127.0.0.1:4310',mode='local',s
     const value=token(),email=req.body.email?emailAddress(req.body.email):null;
     const expiresAt=Date.now()+7*86400000;
     db.prepare('INSERT INTO invites (token_hash,email,created_by,expires_at) VALUES (?,?,?,?)').run(hashToken(value),email,req.user.id,expiresAt);
-    audit(req.user.id,'invite.create');res.status(201).json({url:`${origin}/#invite=${value}`,expiresAt});
+    audit(req.user.id,'invite.create');res.status(201).json({url:`${domains.connection().canonicalOrigin}/#invite=${value}`,expiresAt});
   });
   app.get('/api/admin/overview',(req,res)=>{
     admin(req);

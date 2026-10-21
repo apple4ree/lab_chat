@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('damiDesktop',Object.freeze({
   setState:state=>ipcRenderer.invoke('dami:state',state),
   isActive:()=>ipcRenderer.invoke('dami:active'),
   retry:()=>ipcRenderer.invoke('dami:retry'),
+  changeWorkspace:()=>ipcRenderer.invoke('dami:change-workspace'),
   onNavigate:callback=>{
     if(typeof callback!=='function')return ()=>{};
     const listener=(_event,id)=>{if(typeof id==='string')callback(id);};

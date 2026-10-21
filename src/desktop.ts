@@ -4,7 +4,7 @@ import type {Channel} from './api';
 type DesktopState={userId:string|null;activeChannelId:string|null;channels:{id:string;unread:number;mentions:number;latestMessageId:number}[]};
 declare global {
   interface Window {
-    damiDesktop?:{version:number;setState:(state:DesktopState)=>Promise<{unread:number}>;isActive?:()=>Promise<boolean>;onActivity?:(callback:(active:boolean)=>void)=>()=>void;onNavigate:(callback:(id:string)=>void)=>()=>void;retry:()=>Promise<boolean>};
+    damiDesktop?:{version:number;changeWorkspace?:()=>Promise<boolean>;setState:(state:DesktopState)=>Promise<{unread:number}>;isActive?:()=>Promise<boolean>;onActivity?:(callback:(active:boolean)=>void)=>()=>void;onNavigate:(callback:(id:string)=>void)=>()=>void;retry:()=>Promise<boolean>};
   }
 }
 export function clearDesktopSession(){void window.damiDesktop?.setState({userId:null,activeChannelId:null,channels:[]}).catch(()=>{});}
