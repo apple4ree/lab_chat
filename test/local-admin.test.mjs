@@ -15,7 +15,9 @@ test('operator-created login names preserve existing users, support admin login 
   try{
     const setup=await request('/auth/setup',{setupToken:'local-admin-test-code',email:'original@example.test',name:'Original',password:'original-password'});assert.equal(setup.status,201);const original=await setup.json();
     const oldHash=service.db.prepare('SELECT password_hash FROM users WHERE id=?').get(original.id).password_hash;
-    const admin=await provisionLocalAdmin(service.db,{username:'labadmin',password:'admin123!'});assert.equal(admin.created,true);
+    const admin=await provisionLocalAdmin(service.db,{username:'labadmin',name:'테스트 교수',password:'admin123!'});assert.equal(admin.created,true);
+    assert.equal(service.db.prepare('SELECT name FROM users WHERE id=?').get(admin.id).name,'테스트 교수');
+    await assert.rejects(()=>provisionLocalAdmin(service.db,{username:'labadmin',name:'다른 사용자',password:'admin123!'}),/already exists/);
     assert.equal((await provisionLocalAdmin(service.db,{username:'LABADMIN',password:'admin123!'})).created,false);
     await assert.rejects(()=>provisionLocalAdmin(service.db,{username:'labadmin',password:'different-password'}),/already exists/);
     assert.equal(service.db.prepare('SELECT password_hash FROM users WHERE id=?').get(original.id).password_hash,oldHash);

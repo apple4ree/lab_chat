@@ -196,6 +196,28 @@ function Admin({config,onClose}:{config:AuthConfig;onClose:()=>void}){
   return <Dialog title="워크스페이스 관리" onClose={onClose}>{overview&&<div className="admin-stats"><div><b>{overview.users}</b><span>구성원</span></div><div><b>{overview.channels}</b><span>채널 / DM</span></div><div><b>{overview.messages}</b><span>메시지</span></div></div>}<h3>동료 초대하기</h3><p className="muted small-text">초대 링크는 7일 동안 유효하며 한 번만 사용할 수 있습니다.</p>{config.mode==='demo'?<p className="info-banner">체험 공간에서는 초대 가입을 사용할 수 없습니다. 일반 실행 모드에서 관리자 계정을 만들어 주세요.</p>:<form onSubmit={async e=>{e.preventDefault();setError('');setBusy(true);try{const data=await post<{url:string}>('/admin/invites',{email});setLink(data.url);setCopied(false);}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}><label>초대 이메일 <span className="muted">(선택)</span><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="지정하면 해당 이메일만 가입 가능"/></label><button className="primary" disabled={busy}><Plus size={16}/>초대 링크 만들기</button></form>}{link&&<div className="invite-result"><label>초대 링크<input value={link} readOnly onFocus={e=>e.target.select()}/></label><button className="secondary" onClick={async()=>{try{await navigator.clipboard.writeText(link);setCopied(true);}catch{setError('링크를 선택해 직접 복사해 주세요.');}}}>{copied?<Check size={16}/>:<Copy size={16}/>} {copied?'복사됨':'복사'}</button></div>}<h3>최근 관리 기록</h3><div className="audit-list">{overview?.audit.slice(0,12).map(a=><div key={a.id}><strong>{a.actor||'시스템'}</strong><span>{({'auth.login':'로그인','auth.register':'초대 가입','workspace.setup':'최초 설정','invite.create':'초대 생성','channel.create':'채널 생성','channel.add_member':'구성원 추가','message.delete':'메시지 삭제','auth.password_change':'비밀번호 변경'} as Record<string,string>)[a.action]||a.action}</span><time>{new Date(a.created_at).toLocaleString('ko-KR')}</time></div>)}{!overview?.audit.length&&<p className="muted">기록이 없습니다.</p>}</div>{error&&<p role="alert" className="form-error">{error}</p>}</Dialog>;
 }
 function Profile({me,config,onClose,onLogout,onDesktop}:{me:User;config:AuthConfig;onClose:()=>void;onLogout:()=>void;onDesktop:()=>void}){
-  const [current,setCurrent]=useState(''),[password,setPassword]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
-  return <Dialog title="내 계정" onClose={onClose}><div className="profile-detail"><Avatar user={me}/><div><h3>{me.name}</h3><p>@{me.handle}</p></div><span className="pill">{me.role==='admin'?'관리자':'구성원'}</span></div>{config.mode==='local'&&<form onSubmit={async e=>{e.preventDefault();setBusy(true);try{await post('/auth/password',{currentPassword:current,password});setCurrent('');setPassword('');setMessage('비밀번호가 변경되었습니다. 다른 기기는 로그아웃됩니다.');}catch(e){setMessage((e as Error).message);}finally{setBusy(false);}}}><h3>비밀번호 변경</h3><label>현재 비밀번호<input type="password" value={current} onChange={e=>setCurrent(e.target.value)} required autoComplete="current-password"/></label><label>새 비밀번호<input type="password" value={password} onChange={e=>setPassword(e.target.value)} required minLength={10} maxLength={256} autoComplete="new-password"/></label><button className="secondary" disabled={busy}>비밀번호 변경</button></form>}{message&&<p role="status" className="info-banner">{message}</p>}<button className="secondary" onClick={onDesktop}>데스크톱 앱 다운로드</button><div className="profile-footer"><span><ShieldCheck size={15}/> {config.mode==='demo'?'체험 계정':'임시 연구실 계정'}</span><button className="secondary" onClick={onLogout}><LogOut size={16}/> 로그아웃</button></div></Dialog>;
+  const [current,setCurrent]=useState(''),[password,setPassword]=useState(''),[confirmation,setConfirmation]=useState(''),[message,setMessage]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+  async function changePassword(){
+    setMessage('');setError('');
+    if(password!==confirmation){setError('새 비밀번호와 확인 입력이 일치하지 않습니다.');return;}
+    setBusy(true);
+    try{await post('/auth/password',{currentPassword:current,password});setCurrent('');setPassword('');setConfirmation('');setMessage('비밀번호가 변경되었습니다. 다른 기기는 로그아웃됩니다.');}
+    catch(e){setError((e as Error).message);}
+    finally{setBusy(false);}
+  }
+  return <Dialog title="내 계정" onClose={onClose}>
+    <div className="profile-detail"><Avatar user={me}/><div><h3>{me.name}</h3><p>@{me.handle}</p></div><span className="pill">{me.role==='admin'?'관리자':'구성원'}</span></div>
+    {config.mode==='local'&&<form onSubmit={e=>{e.preventDefault();void changePassword();}}>
+      <h3>비밀번호 변경</h3>
+      <p className="small-text muted">새 비밀번호는 10자 이상 입력하세요. 변경하면 다른 기기는 로그아웃됩니다.</p>
+      <label>현재 비밀번호<input type="password" value={current} onChange={e=>setCurrent(e.target.value)} required maxLength={256} autoComplete="current-password" disabled={busy}/></label>
+      <label>새 비밀번호<input type="password" value={password} onChange={e=>setPassword(e.target.value)} required minLength={10} maxLength={256} autoComplete="new-password" disabled={busy}/></label>
+      <label>새 비밀번호 확인<input type="password" value={confirmation} onChange={e=>setConfirmation(e.target.value)} required minLength={10} maxLength={256} autoComplete="new-password" disabled={busy}/></label>
+      {error&&<p role="alert" className="form-error">{error}</p>}
+      <button className="secondary" disabled={busy}>{busy?'변경 중…':'비밀번호 변경'}</button>
+    </form>}
+    {message&&<p role="status" className="info-banner">{message}</p>}
+    <button className="secondary" onClick={onDesktop}>데스크톱 앱 다운로드</button>
+    <div className="profile-footer"><span><ShieldCheck size={15}/> {config.mode==='demo'?'체험 계정':'임시 연구실 계정'}</span><button className="secondary" onClick={onLogout}><LogOut size={16}/> 로그아웃</button></div>
+  </Dialog>;
 }
