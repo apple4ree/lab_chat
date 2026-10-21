@@ -12,8 +12,11 @@
 | `POST /api/resources/inventory` | 기존 서버 아래 GPU 등록 | 관리자 또는 서버 관리자 |
 | `PUT /api/resources/inventory/:id` | GPU 이름·사양·담당자·예약 허용 여부 수정 | 관리자 또는 서버 관리자 |
 | `POST /api/resources/history/batch` | GPU 1~6개 이력을 같은 시간 범위로 조회 | 로그인한 구성원 |
+| `GET /api/resources/quotas/history?account=…&days=7` | CLI 계정별 주간 한도 추이(최근 1·3·7일) | 로그인한 구성원 |
 
 기존 `GET /api/resources/servers`는 관측값과 등록 사양을 구분하여 제공한다. `GET /api/resources/management`의 `canManageResources`로 장비 설정 가능 여부를 알 수 있다. 실제 권한은 모든 쓰기 요청 시 서버에서 다시 검사한다. 역할 회수는 이미 열린 화면에도 다음 쓰기 요청부터 적용된다.
+
+CLI 이력의 필드·출처·공백 처리·조회 한도는 [QUOTA-TREND.md](QUOTA-TREND.md)를 참고한다.
 
 인증은 기존 로그인 세션 쿠키를 사용한다. 쓰기 요청에는 `Content-Type: application/json`, `X-Lab-Request: 1`이 필요하며 브라우저 `Origin`은 허용된 워크스페이스 주소여야 한다. 무인 서비스용 API 토큰이나 공개 쓰기 API는 제공하지 않는다. 비밀번호·SSH 개인 키·수집 토큰은 이 API에 입력하지 않는다.
 

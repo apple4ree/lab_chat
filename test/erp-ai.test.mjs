@@ -50,7 +50,7 @@ test('ERP rejects malformed/oversized data, redirects, and aborts active reads o
 });
 
 test('chat HTTP routes require login and CSRF; refresh reaches ERP through the GPU source wrapper',async()=>{
-  let refreshes=0;const f=fixture(async(_url,options)=>{if(options.method==='POST'){refreshes++;return Response.json({ok:true,jobs:[null]});}return Response.json(snapshot(Date.now()));});
+  let refreshes=0;const f=fixture(async(url,options)=>{if(options.method==='POST'){refreshes++;return Response.json({ok:true,jobs:[null]});}if(url.pathname.endsWith('usage-history'))return Response.json(historySnapshot(url,Date.now()));return Response.json(snapshot(Date.now()));});
   const service=createApp({dataDir:join(f.dir,'chat'),setupToken:'setup-test-code',resourceSource:f.source,gpuAutoStart:false});
   const server=service.app.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${server.address().port}`;
   try{
@@ -59,5 +59,49 @@ test('chat HTTP routes require login and CSRF; refresh reaches ERP through the G
     const cookie=login.headers.getSetCookie()[0].split(';')[0];assert.equal((await fetch(path,{method:'POST',headers:{Cookie:cookie}})).status,403);
     const response=await fetch(path,{method:'POST',headers:{Cookie:cookie,'X-Lab-Request':'1'}});assert.equal(response.status,202);assert.equal((await response.json()).queued,false);assert.equal(refreshes,1);
     const quota=await(await fetch(base+'/api/resources/quotas',{headers:{Cookie:cookie}})).json();assert.equal(quota.source,'erp');assert.equal(quota.data[0].sevenDay.percent,37);
+    const historyPath=base+'/api/resources/quotas/history?account=account-a&days=1';
+    assert.equal((await fetch(historyPath)).status,401);
+    const h=await fetch(historyPath,{headers:{Cookie:cookie}});assert.equal(h.status,200);const history=await h.json();assert.equal(history.source,'erp');assert.equal(history.data.points[0].remaining,63);
+    assert.equal((await fetch(historyPath.replace('days=1','days=30'),{headers:{Cookie:cookie}})).status,400);
+    assert.equal((await fetch(historyPath.replace('account-a','unknown'),{headers:{Cookie:cookie}})).status,404);
   }finally{service.close();server.closeAllConnections();await new Promise(r=>server.close(r));f.close();}
+});
+
+function historySnapshot(url,now){const since=Number(url.searchParams.get('since'));return {account:url.searchParams.get('account'),period:10080,since,until:now/1000,startedAt:since,intervalMinutes:15,points:[{at:since,remaining:63,window:'weekly',resetsAt:now/1000+86400}],private:'do-not-forward'};}
+
+test('ERP history validates account inventory, deduplicates bounded reads and expires cache without stale fallback',async()=>{
+  let now=1800000000000,fail=false,known=true;const calls=[];
+  const f=fixture(async(url,options)=>{
+    calls.push({url:String(url),method:options.method});
+    if(url.pathname.endsWith('/state'))return Response.json({...snapshot(now),accounts:known?snapshot(now).accounts:[]});
+    if(url.pathname.endsWith('/refresh'))return Response.json({ok:true,jobs:[]});
+    if(fail)return new Response('private failure',{status:502});
+    return Response.json(historySnapshot(url,now));
+  },()=>now);
+  try{
+    const query={account:'account-a',days:1};
+    const [a,b]=await Promise.all([f.source.get('quotaHistory',query),f.source.get('quotaHistory',query)]);assert.deepEqual(a,b);
+    assert.equal(calls.filter(c=>c.url.includes('usage-history')).length,1);assert.equal(a.data.points[0].used,37);assert.equal(JSON.stringify(a).includes('do-not-forward'),false);
+    await f.source.get('quotaHistory',{...query,days:7});assert.equal(calls.filter(c=>c.url.includes('usage-history')).length,2);
+    await f.source.get('quotaHistory',query);assert.equal(calls.filter(c=>c.url.includes('usage-history')).length,2);
+    await f.source.refreshQuotas();await f.source.get('quotaHistory',query);assert.equal(calls.filter(c=>c.url.includes('usage-history')).length,3);
+    now+=30001;fail=true;await assert.rejects(f.source.get('quotaHistory',query),{status:503});assert.equal(f.usageSource.calls,0);
+    known=false;now+=6000;const before=calls.length;await assert.rejects(f.source.get('quotaHistory',query),{status:404});assert.equal(calls.length,before+1);
+  }finally{f.close();}
+});
+
+test('ERP history limits concurrent requests and aborts them on shutdown',async()=>{
+  let now=1800000000000;const signals=[];
+  const f=fixture(async(url,{signal})=>{
+    if(url.pathname.endsWith('/state'))return Response.json({...snapshot(now),accounts:Array.from({length:5},(_,i)=>({...snapshot(now).accounts[0],id:`account-${i}`}))});
+    signals.push(signal);return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new Error('aborted'))));
+  },()=>now);
+  try{
+    await f.source.get('quotas');const requests=Array.from({length:4},(_,i)=>f.source.get('quotaHistory',{account:`account-${i}`,days:1}));
+    const checks=requests.map(p=>assert.rejects(p,{status:503}));
+    await assert.rejects(f.source.get('quotaHistory',{account:'account-4',days:1}),/조회가 많습니다/);
+    // Allow asynchronous session-file reads to attach the cancellation listeners.
+    while(signals.length<4)await new Promise(r=>setImmediate(r));
+    f.source.stop();assert.ok(signals.every(s=>s.aborted));await Promise.all(checks);
+  }finally{f.close();}
 });

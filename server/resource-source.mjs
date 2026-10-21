@@ -1,4 +1,5 @@
 import {gpuClient} from './gpu-http.mjs';
+import {normalizeQuotaHistory,quotaHistoryQuery} from './quota-history.mjs';
 
 export const resourceFailure=(status,message)=>Object.assign(new Error(message),{status});
 const number=(v,max=1e16)=>typeof v==='number'&&Number.isFinite(v)&&v>=0&&v<=max?v:null;
@@ -19,7 +20,7 @@ export function normalizeResourceData(kind,input,now=Date.now()) {
   if(kind==='quotas')return rows(record(input).accounts,200).map(r=>{
     record(r);const at=number(r.ts),stale=!at||at*1000>now+60000||now-at*1000>900000;
     const window=v=>({percent:stale?null:number(v?.percent,100),resetsAt:number(v?.resets_at)?v.resets_at*1000:null});
-    return {provider:text(r.provider,30),account:text(r.email,254),plan:text(r.plan,80),reportedAt:at?at*1000:null,stale,
+    return {id:typeof r.id==='string'?text(r.id,120):undefined,provider:text(r.provider,30),account:text(r.email,254),plan:text(r.plan,80),reportedAt:at?at*1000:null,stale,
       fiveHour:window(r.five_hour),sevenDay:window(r.seven_day),servers:rows(r.servers||[],100).map(s=>({host:typeof s==='string'?text(s,100):text(s?.host,100),lastSeen:number(s?.last_seen)?s.last_seen*1000:null}))};
   });
   if(kind==='usage'){
@@ -43,6 +44,14 @@ export function createResourceSource({baseUrl,reader=baseUrl?gpuClient(baseUrl):
   const cache=new Map(),pending=new Map(),controllers=new Set();let stopped=false;
   async function get(kind,params={}){
     if(stopped)throw resourceFailure(503,'자원 조회가 종료되었습니다.');
+    if(kind==='quotaHistory'){
+      const {account,days}=quotaHistoryQuery(params);
+      if(!demo)throw resourceFailure(503,'ERP 사용량 추이가 연결되지 않았습니다.');
+      if(!['sample-codex','sample-claude'].includes(account))throw resourceFailure(404,'이력을 조회할 수 없는 계정입니다.');
+      const until=now()/1000,since=Math.floor(until/30)*30-days*86400;
+      const points=Array.from({length:days*96},(_,i)=>({at:since+i*900,remaining:i%96===30?null:90-(i%96)*.5,error:i%96===30?'timeout':null,window:'seven_day',resetsAt:since+(Math.floor(i/96)+1)*86400}));
+      return {data:normalizeQuotaHistory({account,period:10080,since,until,startedAt:since,intervalMinutes:15,points},{account,since,now:now()}),fetchedAt:now(),demo:true,source:'demo'};
+    }
     if(!reader&&!demo)throw resourceFailure(503,'자원 이력 서비스가 연결되지 않았습니다.');
     const key=JSON.stringify([kind,params]),cached=cache.get(key);
     if(cached&&now()-cached.fetchedAt<30000)return cached;
@@ -70,7 +79,7 @@ function demoData(kind,p,now){
   if(kind==='targets')return [0,1,2].map(gpu=>({host:'샘플-H200',gpu}));
   if(kind==='history')return Array.from({length:Math.min(301,Math.floor((Number(p.to)-Number(p.from))/Number(p.bucket))+1)},(_,i)=>({ts:Number(p.from)+Number(p.bucket)*i,util:Math.round(45+35*Math.sin(i/5+Number(p.gpu))),mem_used:45000+(i%60)*300,mem_total:143360}));
   if(kind==='share')return [{userId:'sample-researcher',hours:18,pct:75},{userId:'sample-user',hours:6,pct:25}];
-  if(kind==='quotas')return {accounts:[{provider:'codex',email:'sample@example.test',plan:'샘플',ts:now/1000,five_hour:{percent:32,resets_at:now/1000+7200},seven_day:{percent:54,resets_at:now/1000+172800},servers:[{host:'샘플-H200',last_seen:now/1000}]},{provider:'claude',email:'old-sample@example.test',plan:'샘플',ts:now/1000-3600,five_hour:{percent:10},seven_day:{percent:20}}]};
+  if(kind==='quotas')return {accounts:[{id:'sample-codex',provider:'codex',email:'sample@example.test',plan:'샘플',ts:now/1000,five_hour:{percent:32,resets_at:now/1000+7200},seven_day:{percent:54,resets_at:now/1000+172800},servers:[{host:'샘플-H200',last_seen:now/1000}]},{id:'sample-claude',provider:'claude',email:'old-sample@example.test',plan:'샘플',ts:now/1000-3600,five_hour:{percent:10},seven_day:{percent:20}}]};
   const all=[{provider:'openai',model:'sample-model-a',cost_krw:12000,cost_usd:8,in_tok:15000,out_tok:5000,requests:120},{provider:'anthropic',model:'sample-model-b',cost_krw:6000,cost_usd:4,in_tok:10000,out_tok:2000,requests:60}];
   const selected=all.filter(r=>!p.provider||p.provider==='all'||r.provider===p.provider);
   const total=selected.reduce((a,r)=>({cost_krw:a.cost_krw+r.cost_krw,cost_usd:a.cost_usd+r.cost_usd,tokens:a.tokens+r.in_tok+r.out_tok,requests:a.requests+r.requests}),{cost_krw:0,cost_usd:0,tokens:0,requests:0});
